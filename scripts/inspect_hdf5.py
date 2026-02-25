@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# example usage: python scripts/inspect_hdf5.py --h5 data/preprocessed_all_trials.h5
 """Inspect available run keys in a preprocessed HDF5 file."""
 
 from __future__ import annotations

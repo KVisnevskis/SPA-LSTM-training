@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -19,7 +20,18 @@ def main() -> int:
     from spa_lstm.training.workflow import run_training
 
     cfg = load_experiment_config(args.config)
-    out_dir = run_training(cfg)
+    output_dir = Path(cfg.runtime.output_dir) / cfg.runtime.run_name
+    try:
+        out_dir = run_training(cfg)
+    except Exception as exc:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        error_log = output_dir / "training_error.log"
+        with error_log.open("w", encoding="utf-8") as f:
+            f.write(traceback.format_exc())
+        print(f"Training failed: {exc}", file=sys.stderr)
+        print(f"Traceback saved to: {error_log}", file=sys.stderr)
+        return 1
+
     print(f"Training complete. Artifacts in: {out_dir}")
     return 0
 
