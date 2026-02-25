@@ -1,0 +1,37 @@
+name: smoke_slm_lstm_short_1epoch
+
+data:
+  h5_path: outputs/preprocessed_all_trials.h5
+  features: [pressure, acc_x, acc_y, acc_z]
+  target: phi
+  train_runs:
+    - Freehand_sin_1
+    - Freehand_static_03V_1
+  val_runs:
+    - Freehand_sin_2
+    - Freehand_static_03V_2
+  eval_runs:
+    - Freehand_sin_3
+    - Freehand_static_03V_3
+  scaling:
+    mode: prescaled
+    output_min: -1.0
+    output_max: 1.0
+
+model:
+  variant: slm_lstm
+  learning_rate: 0.001
+
+training:
+  epochs: 1
+  patience: 1
+  batch_size: 1
+  stateful: true
+  seed: 42
+
+runtime:
+  output_dir: outputs/experiments
+  run_name: smoke_slm_lstm_short_1epoch
+  save_best_path: best.keras
+  save_final_path: final.keras
+  bounds_path: scaler_bounds.json
