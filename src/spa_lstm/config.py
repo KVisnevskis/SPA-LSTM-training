@@ -81,6 +81,10 @@ class TrainingConfig:
     batch_size: int = 1
     stateful: bool = True
     seed: int = 42
+    verbose: int = 1
+    fit_verbose: int = 0
+    eval_verbose: int = 0
+    log_each_fit: bool = False
 
     def validate(self) -> None:
         if self.epochs <= 0:
@@ -89,6 +93,12 @@ class TrainingConfig:
             raise ValueError("training.patience must be >= 0.")
         if self.batch_size != 1 and self.stateful:
             raise ValueError("Stateful thesis baseline requires batch_size = 1.")
+        if self.verbose < 0:
+            raise ValueError("training.verbose must be >= 0.")
+        if self.fit_verbose not in {0, 1, 2}:
+            raise ValueError("training.fit_verbose must be one of {0, 1, 2}.")
+        if self.eval_verbose not in {0, 1, 2}:
+            raise ValueError("training.eval_verbose must be one of {0, 1, 2}.")
 
 
 @dataclass
@@ -165,6 +175,10 @@ def load_experiment_config(path: str | Path) -> ExperimentConfig:
         batch_size=int(training_raw.get("batch_size", 1)),
         stateful=bool(training_raw.get("stateful", True)),
         seed=int(training_raw.get("seed", 42)),
+        verbose=int(training_raw.get("verbose", 1)),
+        fit_verbose=int(training_raw.get("fit_verbose", 0)),
+        eval_verbose=int(training_raw.get("eval_verbose", 0)),
+        log_each_fit=bool(training_raw.get("log_each_fit", False)),
     )
 
     runtime_cfg = RuntimeConfig(

@@ -38,6 +38,10 @@ training:
   batch_size: 1
   stateful: true
   seed: 42
+  verbose: 1
+  fit_verbose: 1
+  eval_verbose: 0
+  log_each_fit: true
 
 runtime:
   output_dir: outputs/experiments

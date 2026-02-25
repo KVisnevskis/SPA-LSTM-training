@@ -80,6 +80,10 @@ def train_stateful(
     epochs: int,
     patience: int,
     verbose: int = 1,
+    fit_verbose: int = 0,
+    eval_verbose: int = 0,
+    pair_labels: list[str] | None = None,
+    log_each_fit: bool = False,
     start_epoch: int = 1,
     initial_history: list[EpochSummary] | None = None,
     best_epoch: int = 0,
@@ -101,6 +105,10 @@ def train_stateful(
 
     if not train_pairs:
         raise ValueError("train_pairs is empty.")
+    if pair_labels is not None and len(pair_labels) != len(train_pairs):
+        raise ValueError(
+            f"pair_labels length ({len(pair_labels)}) must match train_pairs length ({len(train_pairs)})."
+        )
 
     history: list[EpochSummary] = list(initial_history or [])
     best_val = float(best_val_loss)
@@ -115,10 +123,20 @@ def train_stateful(
         val_rmses: list[float] = []
         val_maes: list[float] = []
 
-        for x_train, y_train, x_val, y_val in train_pairs:
+        for pair_index, (x_train, y_train, x_val, y_val) in enumerate(train_pairs):
+            pair_label = (
+                pair_labels[pair_index]
+                if pair_labels is not None
+                else f"pair_{pair_index + 1}"
+            )
             x_train_b, y_train_b = as_sequence_batch(x_train, y_train)
             x_val_b, y_val_b = as_sequence_batch(x_val, y_val)
 
+            if log_each_fit:
+                print(
+                    f"Epoch {epoch:04d} | fit-start | {pair_label} | "
+                    f"train_shape={x_train_b.shape}->{y_train_b.shape}"
+                )
             reset_recurrent_states(model)
             fit_result = model.fit(
                 x_train_b,
@@ -126,23 +144,44 @@ def train_stateful(
                 epochs=1,
                 batch_size=1,
                 shuffle=False,
-                verbose=0,
+                verbose=fit_verbose,
             )
-            train_losses.append(float(fit_result.history["loss"][-1]))
-            train_rmses.append(float(fit_result.history.get("rmse", [float("nan")])[-1]))
-            train_maes.append(float(fit_result.history.get("mae", [float("nan")])[-1]))
+            train_loss = float(fit_result.history["loss"][-1])
+            train_rmse = float(fit_result.history.get("rmse", [float("nan")])[-1])
+            train_mae = float(fit_result.history.get("mae", [float("nan")])[-1])
+            train_losses.append(train_loss)
+            train_rmses.append(train_rmse)
+            train_maes.append(train_mae)
+            if log_each_fit:
+                print(
+                    f"Epoch {epoch:04d} | fit-end | {pair_label} | "
+                    f"loss={train_loss:.6f} | rmse={train_rmse:.6f} | mae={train_mae:.6f}"
+                )
 
+            if log_each_fit:
+                print(
+                    f"Epoch {epoch:04d} | eval-start | {pair_label} | "
+                    f"val_shape={x_val_b.shape}->{y_val_b.shape}"
+                )
             reset_recurrent_states(model)
             eval_result = model.evaluate(
                 x_val_b,
                 y_val_b,
                 batch_size=1,
-                verbose=0,
+                verbose=eval_verbose,
                 return_dict=True,
             )
-            val_losses.append(float(eval_result["loss"]))
-            val_rmses.append(float(eval_result.get("rmse", float("nan"))))
-            val_maes.append(float(eval_result.get("mae", float("nan"))))
+            val_loss = float(eval_result["loss"])
+            val_rmse = float(eval_result.get("rmse", float("nan")))
+            val_mae = float(eval_result.get("mae", float("nan")))
+            val_losses.append(val_loss)
+            val_rmses.append(val_rmse)
+            val_maes.append(val_mae)
+            if log_each_fit:
+                print(
+                    f"Epoch {epoch:04d} | eval-end | {pair_label} | "
+                    f"loss={val_loss:.6f} | rmse={val_rmse:.6f} | mae={val_mae:.6f}"
+                )
 
         summary = EpochSummary(
             epoch=epoch,

@@ -169,10 +169,12 @@ def run_training(cfg: ExperimentConfig, resume: bool = False) -> Path:
     _write_json(output_dir / cfg.runtime.bounds_path, {column: asdict(value) for column, value in bounds.items()})
 
     train_pairs: list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = []
+    pair_labels: list[str] = []
     for train_key, val_key in zip(cfg.data.train_runs, cfg.data.val_runs):
         x_tr, y_tr = _to_xy(train_scaled[train_key], cfg.data.features, cfg.data.target)
         x_va, y_va = _to_xy(val_scaled[val_key], cfg.data.features, cfg.data.target)
         train_pairs.append((x_tr, y_tr, x_va, y_va))
+        pair_labels.append(f"train={train_key} val={val_key}")
 
     best_model_path = output_dir / cfg.runtime.save_best_path
     final_model_path = output_dir / cfg.runtime.save_final_path
@@ -266,6 +268,11 @@ def run_training(cfg: ExperimentConfig, resume: bool = False) -> Path:
                 train_pairs=train_pairs,
                 epochs=cfg.training.epochs,
                 patience=cfg.training.patience,
+                verbose=cfg.training.verbose,
+                fit_verbose=cfg.training.fit_verbose,
+                eval_verbose=cfg.training.eval_verbose,
+                pair_labels=pair_labels,
+                log_each_fit=cfg.training.log_each_fit,
                 start_epoch=start_epoch,
                 initial_history=history_seed,
                 best_epoch=best_epoch,
