@@ -24,16 +24,9 @@ data:
     - sFreehand_static09V_3
     - sFreehand_sin_3
   scaling:
-    mode: fixed_bounds_thesis
+    mode: prescaled
     output_min: -1.0
     output_max: 1.0
-    accelerometer_in_g: true
-    bounds:
-      acc_x: [-12.0, 12.0]
-      acc_y: [-12.0, 12.0]
-      acc_z: [-12.0, 12.0]
-      pressure: [400.0, 1800.0]
-      phi: [-200.0, 50.0]
 
 model:
   variant: slm_lstm
@@ -52,4 +45,3 @@ runtime:
   save_best_path: best.keras
   save_final_path: final.keras
   bounds_path: scaler_bounds.json
-
