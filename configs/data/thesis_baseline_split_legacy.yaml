@@ -1,0 +1,22 @@
+train_runs:
+  - sFreehand_tt_1
+  - sFreehand_static03V_1
+  - sFreehand_static09V_1
+  - sFreehand_sin_1
+  - s0roll_0pitch_tt_1
+
+val_runs:
+  - sFreehand_tt_2
+  - sFreehand_static03V_2
+  - sFreehand_static09V_2
+  - sFreehand_sin_2
+  - s0roll_0pitch_tt_2
+
+eval_runs:
+  - s0roll_90pitch_tt_1
+  - sFreehand_tt_3
+  - sFreehand_static03V_3
+  - sFreehand_static06V_3
+  - sFreehand_static09V_3
+  - sFreehand_sin_3
+

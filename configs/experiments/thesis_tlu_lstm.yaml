@@ -1,0 +1,52 @@
+name: thesis_tlu_lstm
+
+data:
+  h5_path: outputs/preprocessed_all_trials.h5
+  features: [pressure]
+  target: phi
+  train_runs:
+    - sFreehand_tt_1
+    - sFreehand_static03V_1
+    - sFreehand_static09V_1
+    - sFreehand_sin_1
+    - s0roll_0pitch_tt_1
+  val_runs:
+    - sFreehand_tt_2
+    - sFreehand_static03V_2
+    - sFreehand_static09V_2
+    - sFreehand_sin_2
+    - s0roll_0pitch_tt_2
+  eval_runs:
+    - s0roll_90pitch_tt_1
+    - sFreehand_tt_3
+    - sFreehand_static03V_3
+    - sFreehand_static06V_3
+    - sFreehand_static09V_3
+    - sFreehand_sin_3
+  scaling:
+    mode: fixed_bounds_thesis
+    output_min: -1.0
+    output_max: 1.0
+    accelerometer_in_g: true
+    bounds:
+      pressure: [400.0, 1800.0]
+      phi: [-200.0, 50.0]
+
+model:
+  variant: tlu_lstm
+  learning_rate: 0.001
+
+training:
+  epochs: 700
+  patience: 10
+  batch_size: 1
+  stateful: true
+  seed: 42
+
+runtime:
+  output_dir: outputs/experiments
+  run_name: thesis_tlu_lstm
+  save_best_path: best.keras
+  save_final_path: final.keras
+  bounds_path: scaler_bounds.json
+

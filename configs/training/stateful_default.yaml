@@ -1,0 +1,7 @@
+training:
+  epochs: 700
+  patience: 10
+  batch_size: 1
+  stateful: true
+  seed: 42
+
