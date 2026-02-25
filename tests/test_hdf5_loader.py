@@ -41,7 +41,7 @@ def _fake_tables() -> dict[str, pd.DataFrame]:
     }
 
 
-def test_list_run_keys_supports_runs_and_legacy_layout(monkeypatch) -> None:
+def test_list_run_keys_returns_runs_namespace_keys(monkeypatch) -> None:
     monkeypatch.setattr(
         "spa_lstm.data.hdf5_loader.pd.HDFStore",
         lambda *_args, **_kwargs: _FakeStore(_fake_tables()),
@@ -51,7 +51,7 @@ def test_list_run_keys_supports_runs_and_legacy_layout(monkeypatch) -> None:
     assert keys == ["freehand_tt_1", "run_0roll_0pitch_tt_1"]
 
 
-def test_load_runs_resolves_case_insensitive_keys(monkeypatch) -> None:
+def test_load_runs_requires_exact_run_keys(monkeypatch) -> None:
     monkeypatch.setattr(
         "spa_lstm.data.hdf5_loader.pd.HDFStore",
         lambda *_args, **_kwargs: _FakeStore(_fake_tables()),
@@ -59,14 +59,14 @@ def test_load_runs_resolves_case_insensitive_keys(monkeypatch) -> None:
 
     runs = load_runs_as_dataframes(
         "dummy.h5",
-        run_keys=["sFreehand_tt_1", "s0roll_0pitch_tt_1"],
+        run_keys=["freehand_tt_1", "run_0roll_0pitch_tt_1"],
         required_columns=["pressure", "acc_x", "acc_y", "acc_z", "phi"],
     )
-    assert set(runs) == {"sFreehand_tt_1", "s0roll_0pitch_tt_1"}
-    assert len(runs["sFreehand_tt_1"]) == 2
+    assert set(runs) == {"freehand_tt_1", "run_0roll_0pitch_tt_1"}
+    assert len(runs["freehand_tt_1"]) == 2
 
 
-def test_load_runs_missing_key_error_contains_suggestions(monkeypatch) -> None:
+def test_load_runs_missing_key_error_contains_expected_layout_hint(monkeypatch) -> None:
     monkeypatch.setattr(
         "spa_lstm.data.hdf5_loader.pd.HDFStore",
         lambda *_args, **_kwargs: _FakeStore(_fake_tables()),
@@ -80,7 +80,8 @@ def test_load_runs_missing_key_error_contains_suggestions(monkeypatch) -> None:
         )
 
     message = str(exc.value)
-    assert "Close matches" in message
+    assert "Expected key '/runs/sfreehand_tt_9' under /runs/" in message
+    assert "Available /runs keys (first 10)" in message
     assert "freehand_tt_1" in message
 
 

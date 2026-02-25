@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Literal
 
 import yaml
 
@@ -25,20 +25,15 @@ class ColumnBounds:
 class ScalingConfig:
     """Scaling policy for input features and target."""
 
-    mode: str = "fixed_bounds_thesis"
+    mode: Literal["prescaled"] = "prescaled"
     output_min: float = -1.0
     output_max: float = 1.0
-    accelerometer_in_g: bool = True
-    bounds: dict[str, ColumnBounds] = field(default_factory=dict)
 
     def validate(self) -> None:
-        valid = {"fixed_bounds_thesis", "fit_train_only_minmax", "passthrough"}
-        if self.mode not in valid:
-            raise ValueError(f"Unknown scaling mode '{self.mode}'. Expected one of {sorted(valid)}.")
+        if self.mode != "prescaled":
+            raise ValueError(f"Unsupported scaling mode '{self.mode}'. Expected 'prescaled'.")
         if self.output_max <= self.output_min:
             raise ValueError("output_max must be greater than output_min.")
-        for bound in self.bounds.values():
-            bound.validate()
 
 
 @dataclass
@@ -126,24 +121,12 @@ class ExperimentConfig:
         self.data.scaling.validate()
 
 
-def _as_bounds(raw: Any) -> ColumnBounds:
-    if isinstance(raw, dict):
-        return ColumnBounds(lo=float(raw["lo"]), hi=float(raw["hi"]))
-    if isinstance(raw, (list, tuple)) and len(raw) == 2:
-        return ColumnBounds(lo=float(raw[0]), hi=float(raw[1]))
-    raise ValueError(f"Unsupported bounds format: {raw!r}")
-
-
-def _parse_scaling(raw: dict[str, Any] | None) -> ScalingConfig:
+def _parse_scaling(raw: dict[str, object] | None) -> ScalingConfig:
     raw = raw or {}
-    bounds_raw = raw.get("bounds", {})
-    bounds = {key: _as_bounds(value) for key, value in bounds_raw.items()}
     return ScalingConfig(
-        mode=raw.get("mode", "fixed_bounds_thesis"),
+        mode=str(raw.get("mode", "prescaled")),
         output_min=float(raw.get("output_min", -1.0)),
         output_max=float(raw.get("output_max", 1.0)),
-        accelerometer_in_g=bool(raw.get("accelerometer_in_g", True)),
-        bounds=bounds,
     )
 
 
@@ -201,4 +184,3 @@ def load_experiment_config(path: str | Path) -> ExperimentConfig:
     )
     cfg.validate()
     return cfg
-

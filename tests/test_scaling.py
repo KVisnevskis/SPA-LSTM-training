@@ -4,75 +4,29 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from spa_lstm.config import ColumnBounds, ScalingConfig
-from spa_lstm.data.scaling import (
-    denormalize_target,
-    load_hdf5_scaler_bounds,
-    minmax_inverse,
-    minmax_scale,
-    resolve_scaling_bounds,
-    scale_dataframe,
-)
+from spa_lstm.config import ColumnBounds
+from spa_lstm.data.scaling import denormalize_target, load_hdf5_scaler_bounds, minmax_inverse
 
 
-def test_scale_and_inverse_round_trip() -> None:
-    bounds = ColumnBounds(lo=-2.0, hi=2.0)
-    values = np.array([-2.0, -1.0, 0.0, 1.0, 2.0])
-
-    scaled = minmax_scale(values, bounds, -1.0, 1.0)
-    recovered = minmax_inverse(scaled, bounds, -1.0, 1.0)
-
-    assert np.allclose(values, recovered)
-
-
-def test_fit_train_bounds_respect_accelerometer_unit_conversion() -> None:
-    train_runs = {
-        "run_a": pd.DataFrame(
-            {
-                "acc_x": [-1.0, 1.0],  # values in g
-                "pressure": [500.0, 700.0],
-                "phi": [-20.0, 30.0],
-            }
-        )
-    }
-    scaling_cfg = ScalingConfig(mode="fit_train_only_minmax", accelerometer_in_g=True)
-    bounds = resolve_scaling_bounds(
-        scaling_cfg=scaling_cfg,
-        train_runs=train_runs,
-        feature_columns=["acc_x", "pressure"],
-        target_column="phi",
-    )
-
-    assert bounds["acc_x"].lo == -9.81
-    assert bounds["acc_x"].hi == 9.81
-
-
-def test_fixed_bounds_mode_requires_explicit_bounds() -> None:
-    cfg = ScalingConfig(mode="fixed_bounds_thesis")
-    with pytest.raises(ValueError):
-        resolve_scaling_bounds(
-            scaling_cfg=cfg,
-            train_runs={},
-            feature_columns=["pressure"],
-            target_column="phi",
-        )
-
-
-def test_prescaled_does_not_apply_forward_scaling() -> None:
-    df = pd.DataFrame({"acc_x": [0.5], "pressure": [0.25], "phi": [-0.1]})
-    cfg = ScalingConfig(mode="prescaled", accelerometer_in_g=True)
-    out = scale_dataframe(df, cfg, bounds={}, feature_columns=["acc_x", "pressure"], target_column="phi")
-
-    assert out.equals(df)
-
-
-def test_prescaled_denormalizes_target_values() -> None:
-    cfg = ScalingConfig(mode="prescaled", output_min=-1.0, output_max=1.0)
-    bounds = {"phi": ColumnBounds(lo=-3.0, hi=1.0)}
+def test_minmax_inverse_maps_back_to_physical_range() -> None:
+    bounds = ColumnBounds(lo=-3.0, hi=1.0)
     scaled = np.array([-1.0, 0.0, 1.0], dtype=np.float32)
 
-    unscaled = denormalize_target(scaled, "phi", cfg, bounds)
-    assert np.allclose(unscaled, np.array([-3.0, -1.0, 1.0]))
+    unscaled = minmax_inverse(scaled, bounds, out_min=-1.0, out_max=1.0)
+    assert np.allclose(unscaled, np.array([-3.0, -1.0, 1.0], dtype=np.float64))
+
+
+def test_denormalize_target_uses_named_target_bounds() -> None:
+    bounds = {"phi": ColumnBounds(lo=-30.0, hi=30.0)}
+    scaled = np.array([0.0, 0.5, 1.0], dtype=np.float32)
+
+    unscaled = denormalize_target(scaled, "phi", bounds, out_min=0.0, out_max=1.0)
+    assert np.allclose(unscaled, np.array([-30.0, 0.0, 30.0], dtype=np.float64))
+
+
+def test_denormalize_target_requires_target_bounds() -> None:
+    with pytest.raises(KeyError):
+        denormalize_target(np.array([0.0], dtype=np.float32), "phi", bounds={})
 
 
 class _FakeStore:
@@ -112,7 +66,28 @@ def test_load_hdf5_scaler_bounds_from_meta_table(monkeypatch) -> None:
     assert bounds["phi"].hi == 1.0
 
 
-def test_load_hdf5_scaler_bounds_missing_columns_are_rejected(monkeypatch) -> None:
+def test_load_hdf5_scaler_bounds_requires_meta_table(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "spa_lstm.data.scaling.pd.HDFStore",
+        lambda *_args, **_kwargs: _FakeStore({}),
+    )
+
+    with pytest.raises(KeyError):
+        load_hdf5_scaler_bounds("dummy.h5", columns=["phi"])
+
+
+def test_load_hdf5_scaler_bounds_requires_expected_columns(monkeypatch) -> None:
+    scaler_df = pd.DataFrame([{"column": "phi", "min": -1.0}])
+    monkeypatch.setattr(
+        "spa_lstm.data.scaling.pd.HDFStore",
+        lambda *_args, **_kwargs: _FakeStore({"/meta/scaler_parameters": scaler_df}),
+    )
+
+    with pytest.raises(KeyError):
+        load_hdf5_scaler_bounds("dummy.h5", columns=["phi"])
+
+
+def test_load_hdf5_scaler_bounds_missing_requested_column_is_rejected(monkeypatch) -> None:
     scaler_df = pd.DataFrame([{"column": "pressure", "min": -1.0, "max": 1.0}])
     monkeypatch.setattr(
         "spa_lstm.data.scaling.pd.HDFStore",
