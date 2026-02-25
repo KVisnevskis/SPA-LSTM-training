@@ -7,6 +7,7 @@ import json
 import platform
 import random
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,7 @@ from spa_lstm.data.hdf5_loader import load_runs_as_dataframes
 from spa_lstm.data.scaling import load_hdf5_scaler_bounds
 from spa_lstm.data.splits import assert_disjoint_splits, assert_no_duplicate_runs
 from spa_lstm.models.factory import build_lstm_model
-from spa_lstm.training.stateful import train_stateful
+from spa_lstm.training.stateful import EpochSummary, TrainingResult, train_stateful
 
 
 def _set_reproducible_seed(seed: int) -> None:
@@ -103,7 +104,36 @@ def _write_json(path: Path, payload: dict[str, Any] | list[Any]) -> None:
         json.dump(payload, f, indent=2)
 
 
-def run_training(cfg: ExperimentConfig) -> Path:
+def _load_json(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as f:
+        raw = json.load(f)
+    if not isinstance(raw, dict):
+        raise ValueError(f"Expected JSON object in '{path}', got {type(raw).__name__}.")
+    return raw
+
+
+def _load_keras_model(model_path: Path):
+    try:
+        import tensorflow as tf
+    except ImportError as exc:  # pragma: no cover - runtime dependency
+        raise RuntimeError("TensorFlow is required to load a saved model for resume.") from exc
+    return tf.keras.models.load_model(str(model_path))
+
+
+def _parse_epoch_summary(raw: dict[str, Any]) -> EpochSummary:
+    return EpochSummary(
+        epoch=int(raw["epoch"]),
+        train_loss_mean=float(raw["train_loss_mean"]),
+        train_rmse_mean=float(raw["train_rmse_mean"]),
+        train_mae_mean=float(raw["train_mae_mean"]),
+        val_loss_mean=float(raw["val_loss_mean"]),
+        val_rmse_mean=float(raw["val_rmse_mean"]),
+        val_mae_mean=float(raw["val_mae_mean"]),
+        learning_rate=float(raw["learning_rate"]),
+    )
+
+
+def run_training(cfg: ExperimentConfig, resume: bool = False) -> Path:
     """Execute training run and return output directory path."""
 
     cfg.validate()
@@ -143,19 +173,89 @@ def run_training(cfg: ExperimentConfig) -> Path:
         x_va, y_va = _to_xy(val_scaled[val_key], cfg.data.features, cfg.data.target)
         train_pairs.append((x_tr, y_tr, x_va, y_va))
 
-    model = build_lstm_model(cfg.model, cfg.training, num_features=len(cfg.data.features))
-
-    train_result = train_stateful(
-        model=model,
-        train_pairs=train_pairs,
-        epochs=cfg.training.epochs,
-        patience=cfg.training.patience,
-    )
-
     best_model_path = output_dir / cfg.runtime.save_best_path
     final_model_path = output_dir / cfg.runtime.save_final_path
+    latest_model_path = output_dir / "latest.keras"
+    resume_state_path = output_dir / "resume_state.json"
     best_model_path.parent.mkdir(parents=True, exist_ok=True)
     final_model_path.parent.mkdir(parents=True, exist_ok=True)
+
+    model = build_lstm_model(cfg.model, cfg.training, num_features=len(cfg.data.features))
+    history_seed: list[EpochSummary] = []
+    start_epoch = 1
+    best_epoch = 0
+    best_val_loss = float("inf")
+    epochs_without_improve = 0
+    best_weights = model.get_weights()
+    resumed_from_checkpoint = False
+
+    has_resume_artifacts = resume_state_path.exists() and latest_model_path.exists()
+    if resume and has_resume_artifacts:
+        raw_state = _load_json(resume_state_path)
+        raw_history = raw_state.get("history", [])
+        if not isinstance(raw_history, list):
+            raise ValueError(f"Invalid resume state history in '{resume_state_path}'.")
+        history_seed = [_parse_epoch_summary(item) for item in raw_history]
+        start_epoch = int(raw_state.get("next_epoch", len(history_seed) + 1))
+        best_epoch = int(raw_state.get("best_epoch", 0))
+        best_val_loss = float(raw_state.get("best_val_loss", float("inf")))
+        epochs_without_improve = int(raw_state.get("epochs_without_improve", 0))
+
+        model = _load_keras_model(latest_model_path)
+        if best_model_path.exists():
+            best_weights = _load_keras_model(best_model_path).get_weights()
+        else:
+            best_weights = model.get_weights()
+        resumed_from_checkpoint = True
+    elif resume and not has_resume_artifacts:
+        print("Resume requested but no resume artifacts found; starting a fresh training run.")
+
+    def _persist_epoch_state(
+        summary: EpochSummary,
+        history: list[EpochSummary],
+        best_epoch_now: int,
+        best_val_loss_now: float,
+        epochs_without_improve_now: int,
+    ) -> None:
+        model.save(latest_model_path)
+        if summary.epoch == best_epoch_now:
+            model.save(best_model_path)
+        _write_json(
+            resume_state_path,
+            {
+                "next_epoch": summary.epoch + 1,
+                "best_epoch": best_epoch_now,
+                "best_val_loss": best_val_loss_now,
+                "epochs_without_improve": epochs_without_improve_now,
+                "history": [asdict(epoch) for epoch in history],
+                "latest_model": str(latest_model_path),
+                "best_model": str(best_model_path),
+                "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+    if start_epoch > cfg.training.epochs:
+        train_result = TrainingResult(
+            history=history_seed,
+            best_epoch=best_epoch,
+            best_val_loss=best_val_loss,
+            stopped_early=False,
+            best_weights=best_weights,
+        )
+    else:
+        train_result = train_stateful(
+            model=model,
+            train_pairs=train_pairs,
+            epochs=cfg.training.epochs,
+            patience=cfg.training.patience,
+            start_epoch=start_epoch,
+            initial_history=history_seed,
+            best_epoch=best_epoch,
+            best_val_loss=best_val_loss,
+            best_weights=best_weights,
+            epochs_without_improve=epochs_without_improve,
+            on_epoch_end=_persist_epoch_state,
+        )
 
     model.save(final_model_path)
     model.set_weights(train_result.best_weights)
@@ -188,6 +288,9 @@ def run_training(cfg: ExperimentConfig) -> Path:
         "best_epoch": train_result.best_epoch,
         "best_val_loss": train_result.best_val_loss,
         "stopped_early": train_result.stopped_early,
+        "resumed_from_checkpoint": resumed_from_checkpoint,
+        "resume_state_path": str(resume_state_path),
+        "latest_model_path": str(latest_model_path),
     }
     training_summary_path = output_dir / "training_summary.json"
     _write_json(training_summary_path, training_summary)
@@ -205,6 +308,9 @@ def run_training(cfg: ExperimentConfig) -> Path:
         "bounds": str(output_dir / cfg.runtime.bounds_path),
         "config_snapshot": str(config_snapshot_path),
         "training_summary": str(training_summary_path),
+        "resume_state": str(resume_state_path),
+        "latest_model": str(latest_model_path),
+        "resumed_from_checkpoint": resumed_from_checkpoint,
         "epochs_completed": len(train_result.history),
         "split_counts": {
             "train_runs": len(cfg.data.train_runs),

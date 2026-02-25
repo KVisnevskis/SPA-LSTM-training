@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
@@ -31,6 +31,9 @@ class TrainingResult:
     best_val_loss: float
     stopped_early: bool
     best_weights: list[Any]
+
+
+EpochEndCallback = Callable[[EpochSummary, list[EpochSummary], int, float, int], None]
 
 
 def reset_recurrent_states(model) -> None:
@@ -77,6 +80,13 @@ def train_stateful(
     epochs: int,
     patience: int,
     verbose: int = 1,
+    start_epoch: int = 1,
+    initial_history: list[EpochSummary] | None = None,
+    best_epoch: int = 0,
+    best_val_loss: float = float("inf"),
+    best_weights: list[Any] | None = None,
+    epochs_without_improve: int = 0,
+    on_epoch_end: EpochEndCallback | None = None,
 ) -> TrainingResult:
     """Train with run-wise state resets and early stopping.
 
@@ -92,14 +102,12 @@ def train_stateful(
     if not train_pairs:
         raise ValueError("train_pairs is empty.")
 
-    history: list[EpochSummary] = []
-    best_val = float("inf")
-    best_epoch = 0
-    epochs_without_improve = 0
-    best_weights = model.get_weights()
+    history: list[EpochSummary] = list(initial_history or [])
+    best_val = float(best_val_loss)
+    best_weights = model.get_weights() if best_weights is None else best_weights
     stopped_early = False
 
-    for epoch in range(1, epochs + 1):
+    for epoch in range(start_epoch, epochs + 1):
         train_losses: list[float] = []
         train_rmses: list[float] = []
         train_maes: list[float] = []
@@ -166,6 +174,9 @@ def train_stateful(
             best_weights = model.get_weights()
         else:
             epochs_without_improve += 1
+
+        if on_epoch_end is not None:
+            on_epoch_end(summary, history, best_epoch, float(best_val), epochs_without_improve)
 
         if epochs_without_improve >= patience:
             if verbose:

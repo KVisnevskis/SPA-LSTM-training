@@ -14,6 +14,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 def main() -> int:
     parser = argparse.ArgumentParser(description="Train SPA-LSTM model from config.")
     parser.add_argument("--config", required=True, help="Path to experiment config YAML.")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume training from latest checkpoint in the run output directory.",
+    )
     args = parser.parse_args()
 
     from spa_lstm.config import load_experiment_config
@@ -22,7 +27,7 @@ def main() -> int:
     cfg = load_experiment_config(args.config)
     output_dir = Path(cfg.runtime.output_dir) / cfg.runtime.run_name
     try:
-        out_dir = run_training(cfg)
+        out_dir = run_training(cfg, resume=args.resume)
     except Exception as exc:
         output_dir.mkdir(parents=True, exist_ok=True)
         error_log = output_dir / "training_error.log"
