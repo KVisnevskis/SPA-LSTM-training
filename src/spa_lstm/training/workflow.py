@@ -19,6 +19,7 @@ from spa_lstm.data.hdf5_loader import load_runs_as_dataframes
 from spa_lstm.data.scaling import load_hdf5_scaler_bounds
 from spa_lstm.data.splits import assert_disjoint_splits, assert_no_duplicate_runs
 from spa_lstm.models.factory import build_lstm_model
+from spa_lstm.training.resource_monitor import ResourceMonitor
 from spa_lstm.training.stateful import EpochSummary, TrainingResult, train_stateful
 
 
@@ -234,28 +235,48 @@ def run_training(cfg: ExperimentConfig, resume: bool = False) -> Path:
             },
         )
 
-    if start_epoch > cfg.training.epochs:
-        train_result = TrainingResult(
-            history=history_seed,
-            best_epoch=best_epoch,
-            best_val_loss=best_val_loss,
-            stopped_early=False,
-            best_weights=best_weights,
-        )
-    else:
-        train_result = train_stateful(
-            model=model,
-            train_pairs=train_pairs,
-            epochs=cfg.training.epochs,
-            patience=cfg.training.patience,
-            start_epoch=start_epoch,
-            initial_history=history_seed,
-            best_epoch=best_epoch,
-            best_val_loss=best_val_loss,
-            best_weights=best_weights,
-            epochs_without_improve=epochs_without_improve,
-            on_epoch_end=_persist_epoch_state,
-        )
+    resource_csv_path = output_dir / "resource_usage.csv"
+    monitor = ResourceMonitor(resource_csv_path, interval_seconds=15.0)
+    resource_info: dict[str, Any] = {
+        "resource_usage_csv": str(resource_csv_path),
+        "resource_samples": 0,
+        "resource_interval_seconds": 15.0,
+        "gpu_metrics_observed": False,
+    }
+    monitor_started = False
+
+    try:
+        monitor.start()
+        monitor_started = True
+    except Exception as exc:
+        print(f"Resource monitor disabled: {exc}")
+
+    try:
+        if start_epoch > cfg.training.epochs:
+            train_result = TrainingResult(
+                history=history_seed,
+                best_epoch=best_epoch,
+                best_val_loss=best_val_loss,
+                stopped_early=False,
+                best_weights=best_weights,
+            )
+        else:
+            train_result = train_stateful(
+                model=model,
+                train_pairs=train_pairs,
+                epochs=cfg.training.epochs,
+                patience=cfg.training.patience,
+                start_epoch=start_epoch,
+                initial_history=history_seed,
+                best_epoch=best_epoch,
+                best_val_loss=best_val_loss,
+                best_weights=best_weights,
+                epochs_without_improve=epochs_without_improve,
+                on_epoch_end=_persist_epoch_state,
+            )
+    finally:
+        if monitor_started:
+            resource_info = monitor.stop()
 
     model.save(final_model_path)
     model.set_weights(train_result.best_weights)
@@ -291,6 +312,7 @@ def run_training(cfg: ExperimentConfig, resume: bool = False) -> Path:
         "resumed_from_checkpoint": resumed_from_checkpoint,
         "resume_state_path": str(resume_state_path),
         "latest_model_path": str(latest_model_path),
+        **resource_info,
     }
     training_summary_path = output_dir / "training_summary.json"
     _write_json(training_summary_path, training_summary)
@@ -311,6 +333,7 @@ def run_training(cfg: ExperimentConfig, resume: bool = False) -> Path:
         "resume_state": str(resume_state_path),
         "latest_model": str(latest_model_path),
         "resumed_from_checkpoint": resumed_from_checkpoint,
+        "resource_usage": resource_info,
         "epochs_completed": len(train_result.history),
         "split_counts": {
             "train_runs": len(cfg.data.train_runs),
