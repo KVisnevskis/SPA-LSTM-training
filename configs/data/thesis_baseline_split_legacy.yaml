@@ -1,22 +1,22 @@
 train_runs:
-  - sFreehand_tt_1
-  - sFreehand_static03V_1
-  - sFreehand_static09V_1
-  - sFreehand_sin_1
-  - s0roll_0pitch_tt_1
+  - Freehand_tt_1
+  - Freehand_static_03V_1
+  - Freehand_static_09V_1
+  - Freehand_sin_1
+  - run_0roll_0pitch_tt_1
 
 val_runs:
-  - sFreehand_tt_2
-  - sFreehand_static03V_2
-  - sFreehand_static09V_2
-  - sFreehand_sin_2
-  - s0roll_0pitch_tt_2
+  - Freehand_tt_2
+  - Freehand_static_03V_2
+  - Freehand_static_09V_2
+  - Freehand_sin_2
+  - run_0roll_0pitch_tt_2
 
 eval_runs:
-  - s0roll_90pitch_tt_1
-  - sFreehand_tt_3
-  - sFreehand_static03V_3
-  - sFreehand_static06V_3
-  - sFreehand_static09V_3
-  - sFreehand_sin_3
+  - run_0roll_90pitch_tt_1
+  - Freehand_tt_3
+  - Freehand_static_03V_3
+  - Freehand_static_06V_3
+  - Freehand_static_09V_3
+  - Freehand_sin_3
 
