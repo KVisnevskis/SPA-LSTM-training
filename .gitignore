@@ -1,0 +1,29 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+*.pyo
+*.pyd
+
+outputs/
+*.keras
+*.h5
+*.hdf5
+*.csv
+*.json
+
+# Build and packaging artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Notebook/editor noise
+.ipynb_checkpoints/
+.DS_Store
+
+# Keep context handoff archives, ignore extracted folders/files by default
+context/*
+
