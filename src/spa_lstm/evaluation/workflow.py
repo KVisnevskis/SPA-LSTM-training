@@ -11,7 +11,7 @@ import pandas as pd
 from spa_lstm.config import ExperimentConfig
 from spa_lstm.data.constants import REQUIRED_BASE_COLUMNS
 from spa_lstm.data.hdf5_loader import load_runs_as_dataframes
-from spa_lstm.data.scaling import denormalize_target, load_bounds_json, resolve_scaling_bounds, scale_dataframe
+from spa_lstm.data.scaling import denormalize_target, load_hdf5_scaler_bounds
 from spa_lstm.evaluation.metrics import mae, rmse
 from spa_lstm.training.stateful import reset_recurrent_states
 
@@ -28,20 +28,25 @@ def evaluate_model(cfg: ExperimentConfig, model_path: str, run_dir: str | None =
     output_dir.mkdir(parents=True, exist_ok=True)
 
     required_columns = tuple(dict.fromkeys(list(REQUIRED_BASE_COLUMNS) + cfg.data.features + [cfg.data.target]))
-
-    train_raw = load_runs_as_dataframes(cfg.data.h5_path, cfg.data.train_runs, required_columns)
     eval_raw = load_runs_as_dataframes(cfg.data.h5_path, cfg.data.eval_runs, required_columns)
+    scale_columns = list(dict.fromkeys(cfg.data.features + [cfg.data.target]))
 
     bounds_file = output_dir / cfg.runtime.bounds_path
     if bounds_file.exists():
         bounds = load_bounds_json(bounds_file)
+    elif cfg.data.scaling.mode == "prescaled":
+        bounds = load_hdf5_scaler_bounds(cfg.data.h5_path, columns=scale_columns)
     else:
+        train_raw = load_runs_as_dataframes(cfg.data.h5_path, cfg.data.train_runs, required_columns)
         bounds = resolve_scaling_bounds(cfg.data.scaling, train_raw, cfg.data.features, cfg.data.target)
 
-    eval_scaled = {
-        key: scale_dataframe(df, cfg.data.scaling, bounds, cfg.data.features, cfg.data.target)
-        for key, df in eval_raw.items()
-    }
+    if cfg.data.scaling.mode == "prescaled":
+        eval_scaled = eval_raw
+    else:
+        eval_scaled = {
+            key: scale_dataframe(df, cfg.data.scaling, bounds, cfg.data.features, cfg.data.target)
+            for key, df in eval_raw.items()
+        }
 
     model = tf.keras.models.load_model(model_path)
 
@@ -86,4 +91,3 @@ def evaluate_model(cfg: ExperimentConfig, model_path: str, run_dir: str | None =
         json.dump(records, f, indent=2)
 
     return metrics_path
-
