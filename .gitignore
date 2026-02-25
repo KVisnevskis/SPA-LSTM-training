@@ -27,3 +27,5 @@ pip-wheel-metadata/
 # Keep context handoff archives, ignore extracted folders/files by default
 context/*
 
+# Local scratch/reference-only files (intentionally untracked)
+legacy/
