@@ -163,7 +163,19 @@ def run_training(cfg: ExperimentConfig) -> Path:
 
     history_path = output_dir / "history.csv"
     with history_path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["epoch", "train_loss_mean", "val_loss_mean", "learning_rate"])
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "epoch",
+                "train_loss_mean",
+                "train_rmse_mean",
+                "train_mae_mean",
+                "val_loss_mean",
+                "val_rmse_mean",
+                "val_mae_mean",
+                "learning_rate",
+            ],
+        )
         writer.writeheader()
         for epoch in train_result.history:
             writer.writerow(asdict(epoch))
