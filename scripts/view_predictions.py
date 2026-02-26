@@ -13,13 +13,22 @@ from pathlib import Path
 from typing import Any
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import filedialog, messagebox, ttk
+
+MATPLOTLIB_IMPORT_ERROR: Exception | None = None
+try:
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+    from matplotlib.figure import Figure
+except ImportError as exc:  # pragma: no cover - runtime dependency
+    MATPLOTLIB_IMPORT_ERROR = exc
 
 
 PRED_TRUE_COL = "phi_true_deg"
 PRED_PRED_COL = "phi_pred_deg"
 PRED_TIME_COL = "Time"
 MAX_PLOT_POINTS = 2400
+RAD_TO_DEG = 180.0 / math.pi
+ANGLE_UNIT_OPTIONS = ("degrees", "radians")
 
 
 @dataclass(frozen=True)
@@ -51,6 +60,20 @@ def _fmt(value: Any, digits: int = 6) -> str:
     if num is None:
         return "n/a"
     return f"{num:.{digits}f}"
+
+
+def _convert_angle(value: float | None, unit: str) -> float | None:
+    if value is None:
+        return None
+    if unit == "deg":
+        return value * RAD_TO_DEG
+    return value
+
+
+def _convert_angles(values: list[float], unit: str) -> list[float]:
+    if unit == "deg":
+        return [v * RAD_TO_DEG for v in values]
+    return values
 
 
 def _read_json(path: Path) -> Any | None:
@@ -110,23 +133,26 @@ def _weighted_eval_summary(eval_metrics: Any) -> dict[str, float | int] | None:
         if not isinstance(row, dict):
             continue
         n = _safe_float(str(row.get("n_samples", "")))
-        rmse = _safe_float(str(row.get("rmse_deg", "")))
-        mae = _safe_float(str(row.get("mae_deg", "")))
-        if n is None or rmse is None or mae is None or n <= 0:
+        # eval_metrics uses legacy *_deg names but values are currently radians.
+        rmse_rad = _safe_float(str(row.get("rmse_deg", "")))
+        mae_rad = _safe_float(str(row.get("mae_deg", "")))
+        if n is None or rmse_rad is None or mae_rad is None or n <= 0:
             continue
         n_int = int(n)
         n_trials += 1
         n_samples_total += n_int
-        mse_sum += (rmse * rmse) * n_int
-        mae_sum += mae * n_int
+        mse_sum += (rmse_rad * rmse_rad) * n_int
+        mae_sum += mae_rad * n_int
 
     if n_trials == 0 or n_samples_total == 0:
         return None
+    weighted_rmse_rad = math.sqrt(mse_sum / n_samples_total)
+    weighted_mae_rad = mae_sum / n_samples_total
     return {
         "n_trials": n_trials,
         "n_samples": n_samples_total,
-        "weighted_rmse_deg": math.sqrt(mse_sum / n_samples_total),
-        "weighted_mae_deg": mae_sum / n_samples_total,
+        "weighted_rmse_rad": weighted_rmse_rad,
+        "weighted_mae_rad": weighted_mae_rad,
     }
 
 
@@ -149,6 +175,7 @@ def _run_metadata(run_dir: Path) -> dict[str, Any]:
 
     return {
         "eval_metrics": eval_metrics,
+        "config_name": config_snapshot.get("name", manifest.get("config_name", run_dir.name)),
         "best_epoch": best_epoch,
         "best_val_loss": training_summary.get("best_val_loss"),
         "epochs_completed": training_summary.get("epochs_completed"),
@@ -201,6 +228,7 @@ def _read_prediction_csv(path: Path) -> tuple[str, list[float], list[float], lis
                 xv = float(index)
 
             x_vals.append(float(xv))
+            # Keep internal representation in radians; convert at display time.
             y_true.append(float(yt))
             y_pred.append(float(yp))
 
@@ -234,12 +262,18 @@ def _compute_trial_stats(y_true: list[float], y_pred: list[float]) -> TrialStats
     )
 
 
-def _find_eval_record(eval_metrics: Any, trial_name: str) -> dict[str, Any] | None:
+def _find_eval_record(eval_metrics: Any, trial_name: str, unit: str) -> dict[str, Any] | None:
     if not isinstance(eval_metrics, list):
         return None
     for row in eval_metrics:
         if isinstance(row, dict) and str(row.get("run_key")) == trial_name:
-            return row
+            rmse_rad = _safe_float(str(row.get("rmse_deg", "")))
+            mae_rad = _safe_float(str(row.get("mae_deg", "")))
+            return {
+                **row,
+                "rmse_display": _convert_angle(rmse_rad, unit),
+                "mae_display": _convert_angle(mae_rad, unit),
+            }
     return None
 
 
@@ -255,6 +289,7 @@ class PredictionViewer:
 
         self.model_var = tk.StringVar()
         self.trial_var = tk.StringVar()
+        self.unit_var = tk.StringVar(value="degrees")
         self.rmse_var = tk.StringVar(value="-")
         self.mae_var = tk.StringVar(value="-")
         self.max_err_var = tk.StringVar(value="-")
@@ -265,7 +300,15 @@ class PredictionViewer:
 
         self.model_combo: ttk.Combobox
         self.trial_combo: ttk.Combobox
-        self.canvas: tk.Canvas
+        self.unit_combo: ttk.Combobox
+        self.rmse_label: ttk.Label
+        self.mae_label: ttk.Label
+        self.max_err_label: ttk.Label
+        self.bias_label: ttk.Label
+        self.figure: Figure
+        self.ax: Any
+        self.plot_canvas: FigureCanvasTkAgg
+        self.toolbar: NavigationToolbar2Tk
         self.info_text: tk.Text
 
         self._build_ui()
@@ -292,15 +335,37 @@ class PredictionViewer:
         self.trial_combo.pack(side=tk.LEFT, padx=(8, 0))
         self.trial_combo.bind("<<ComboboxSelected>>", self._on_trial_change)
 
+        ttk.Label(controls, text="Angle unit").pack(side=tk.LEFT, padx=(18, 0))
+        self.unit_combo = ttk.Combobox(
+            controls,
+            textvariable=self.unit_var,
+            state="readonly",
+            width=10,
+            values=ANGLE_UNIT_OPTIONS,
+        )
+        self.unit_combo.pack(side=tk.LEFT, padx=(8, 0))
+        self.unit_combo.bind("<<ComboboxSelected>>", self._on_unit_change)
+
         main = ttk.Frame(container)
         main.pack(fill=tk.BOTH, expand=True)
 
         left = ttk.LabelFrame(main, text="Predicted vs Ground Truth")
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 8))
 
-        self.canvas = tk.Canvas(left, background="#ffffff", highlightthickness=0)
-        self.canvas.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
-        self.canvas.bind("<Configure>", self._on_canvas_resize)
+        plot_actions = ttk.Frame(left)
+        plot_actions.pack(fill=tk.X, padx=6, pady=(6, 0))
+        export_btn = ttk.Button(plot_actions, text="Export PNG", command=self._export_png)
+        export_btn.pack(side=tk.RIGHT)
+
+        self.figure = Figure(figsize=(8, 6), dpi=100)
+        self.ax = self.figure.add_subplot(111)
+        self.plot_canvas = FigureCanvasTkAgg(self.figure, master=left)
+        self.plot_canvas.draw()
+        self.plot_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+
+        self.toolbar = NavigationToolbar2Tk(self.plot_canvas, left, pack_toolbar=False)
+        self.toolbar.update()
+        self.toolbar.pack(fill=tk.X, padx=6, pady=(0, 6))
 
         right = ttk.LabelFrame(main, text="Metrics and Best Params")
         right.pack(side=tk.RIGHT, fill=tk.Y)
@@ -308,10 +373,10 @@ class PredictionViewer:
         metrics_grid = ttk.Frame(right, padding=(8, 8, 8, 4))
         metrics_grid.pack(fill=tk.X)
 
-        self._metric_row(metrics_grid, 0, "Trial RMSE (deg)", self.rmse_var)
-        self._metric_row(metrics_grid, 1, "Trial MAE (deg)", self.mae_var)
-        self._metric_row(metrics_grid, 2, "Max |error| (deg)", self.max_err_var)
-        self._metric_row(metrics_grid, 3, "Bias (deg)", self.bias_var)
+        self.rmse_label = self._metric_row(metrics_grid, 0, "Trial RMSE (deg)", self.rmse_var)
+        self.mae_label = self._metric_row(metrics_grid, 1, "Trial MAE (deg)", self.mae_var)
+        self.max_err_label = self._metric_row(metrics_grid, 2, "Max |error| (deg)", self.max_err_var)
+        self.bias_label = self._metric_row(metrics_grid, 3, "Bias (deg)", self.bias_var)
         self._metric_row(metrics_grid, 4, "Best epoch", self.best_epoch_var)
         self._metric_row(metrics_grid, 5, "Best val loss", self.best_val_var)
 
@@ -328,9 +393,24 @@ class PredictionViewer:
         status = ttk.Label(right, textvariable=self.status_var, foreground="#4b5563")
         status.pack(fill=tk.X, padx=10, pady=(0, 8))
 
-    def _metric_row(self, parent: ttk.Frame, row: int, label: str, value_var: tk.StringVar) -> None:
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=2)
+        self._update_unit_labels()
+
+    def _metric_row(self, parent: ttk.Frame, row: int, label: str, value_var: tk.StringVar) -> ttk.Label:
+        label_widget = ttk.Label(parent, text=label)
+        label_widget.grid(row=row, column=0, sticky="w", padx=(0, 10), pady=2)
         ttk.Label(parent, textvariable=value_var).grid(row=row, column=1, sticky="e", pady=2)
+        return label_widget
+
+    def _selected_unit(self) -> str:
+        return "rad" if self.unit_var.get().strip().lower().startswith("rad") else "deg"
+
+    def _update_unit_labels(self) -> None:
+        unit = self._selected_unit()
+        suffix = "rad" if unit == "rad" else "deg"
+        self.rmse_label.configure(text=f"Trial RMSE ({suffix})")
+        self.mae_label.configure(text=f"Trial MAE ({suffix})")
+        self.max_err_label.configure(text=f"Max |error| ({suffix})")
+        self.bias_label.configure(text=f"Bias ({suffix})")
 
     def _populate_models(self) -> None:
         model_names = sorted(self.runs)
@@ -394,11 +474,17 @@ class PredictionViewer:
         if self.current_run is None or self.current_trial_data is None:
             return
 
-        x_label, x_vals, y_true, y_pred = self.current_trial_data
+        unit = self._selected_unit()
+        self._update_unit_labels()
+
+        x_label, x_vals, y_true_rad, y_pred_rad = self.current_trial_data
+        y_true = _convert_angles(y_true_rad, unit)
+        y_pred = _convert_angles(y_pred_rad, unit)
         stats = _compute_trial_stats(y_true, y_pred)
         eval_record = _find_eval_record(
             None if self.current_meta is None else self.current_meta.get("eval_metrics"),
             self.current_trial_name or "",
+            unit,
         )
 
         self.rmse_var.set(_fmt(stats.rmse_deg, 4))
@@ -413,34 +499,44 @@ class PredictionViewer:
             self.best_epoch_var.set(str(self.current_meta.get("best_epoch", "n/a")))
             self.best_val_var.set(_fmt(self.current_meta.get("best_val_loss"), 4))
 
-        self._draw_plot(x_label, x_vals, y_true, y_pred, self.current_trial_name or "")
-        self._set_info(self._build_detail_text(stats, eval_record))
+        config_name = "n/a" if self.current_meta is None else str(self.current_meta.get("config_name", "n/a"))
+        self._draw_plot(
+            x_label,
+            x_vals,
+            y_true,
+            y_pred,
+            self.current_trial_name or "",
+            config_name,
+            unit,
+        )
+        self._set_info(self._build_detail_text(stats, eval_record, unit))
         self.status_var.set(
-            f"run={self.current_run.name} | trial={self.current_trial_name} | samples={stats.n_samples}"
+            f"run={self.current_run.name} | trial={self.current_trial_name} | unit={unit} | samples={stats.n_samples}"
         )
 
-    def _build_detail_text(self, stats: TrialStats, eval_record: dict[str, Any] | None) -> str:
+    def _build_detail_text(self, stats: TrialStats, eval_record: dict[str, Any] | None, unit: str) -> str:
         run_name = self.current_run.name if self.current_run else "n/a"
         trial = self.current_trial_name or "n/a"
         meta = self.current_meta or {}
+        unit_label = "deg" if unit == "deg" else "rad"
 
         lines: list[str] = []
         lines.append("Selected Trial")
         lines.append(f"- run: {run_name}")
         lines.append(f"- trial: {trial}")
         lines.append(f"- samples: {stats.n_samples}")
-        lines.append(f"- rmse_deg (recomputed): {_fmt(stats.rmse_deg)}")
-        lines.append(f"- mae_deg (recomputed): {_fmt(stats.mae_deg)}")
-        lines.append(f"- max_abs_err_deg: {_fmt(stats.max_abs_err_deg)}")
-        lines.append(f"- bias_deg: {_fmt(stats.bias_deg)}")
+        lines.append(f"- rmse_{unit_label} (recomputed): {_fmt(stats.rmse_deg)}")
+        lines.append(f"- mae_{unit_label} (recomputed): {_fmt(stats.mae_deg)}")
+        lines.append(f"- max_abs_err_{unit_label}: {_fmt(stats.max_abs_err_deg)}")
+        lines.append(f"- bias_{unit_label}: {_fmt(stats.bias_deg)}")
         lines.append("")
 
         lines.append("eval_metrics.json record")
         if eval_record is None:
             lines.append("- matching record: n/a")
         else:
-            lines.append(f"- rmse_deg: {_fmt(eval_record.get('rmse_deg'))}")
-            lines.append(f"- mae_deg: {_fmt(eval_record.get('mae_deg'))}")
+            lines.append(f"- rmse_{unit_label}: {_fmt(eval_record.get('rmse_display'))}")
+            lines.append(f"- mae_{unit_label}: {_fmt(eval_record.get('mae_display'))}")
             lines.append(f"- n_samples: {eval_record.get('n_samples', 'n/a')}")
         lines.append("")
 
@@ -477,8 +573,12 @@ class PredictionViewer:
         if isinstance(overall, dict):
             lines.append(f"- n_trials: {overall.get('n_trials', 'n/a')}")
             lines.append(f"- n_samples: {overall.get('n_samples', 'n/a')}")
-            lines.append(f"- weighted_rmse_deg: {_fmt(overall.get('weighted_rmse_deg'))}")
-            lines.append(f"- weighted_mae_deg: {_fmt(overall.get('weighted_mae_deg'))}")
+            lines.append(
+                f"- weighted_rmse_{unit_label}: {_fmt(_convert_angle(overall.get('weighted_rmse_rad'), unit))}"
+            )
+            lines.append(
+                f"- weighted_mae_{unit_label}: {_fmt(_convert_angle(overall.get('weighted_mae_rad'), unit))}"
+            )
         else:
             lines.append("- summary: n/a")
 
@@ -500,23 +600,51 @@ class PredictionViewer:
         if trial_name:
             self._load_trial(trial_name)
 
-    def _on_canvas_resize(self, _event: tk.Event) -> None:
+    def _on_unit_change(self, _event: tk.Event) -> None:
+        self._update_unit_labels()
         if self.current_trial_data is None:
-            self._draw_message("Select a run and trial to plot")
             return
         self._refresh_trial_view()
 
-    def _draw_message(self, message: str) -> None:
-        self.canvas.delete("all")
-        width = max(1, self.canvas.winfo_width())
-        height = max(1, self.canvas.winfo_height())
-        self.canvas.create_text(
-            width / 2,
-            height / 2,
-            text=message,
-            fill="#556071",
-            font=("TkDefaultFont", 14),
+    def _export_png(self) -> None:
+        if self.current_run is None or self.current_trial_name is None:
+            messagebox.showinfo("Export PNG", "Select a run and trial before exporting.")
+            return
+
+        default_name = f"{self.current_run.name}__{self.current_trial_name}.png"
+        selected = filedialog.asksaveasfilename(
+            title="Export Figure as PNG",
+            defaultextension=".png",
+            initialfile=default_name,
+            initialdir=str(self.current_run.resolve()),
+            filetypes=[("PNG image", "*.png"), ("All files", "*.*")],
         )
+        if not selected:
+            return
+
+        try:
+            self.figure.savefig(selected, dpi=220, bbox_inches="tight")
+        except Exception as exc:
+            messagebox.showerror("Export Failed", f"Failed to save figure:\n{exc}")
+            return
+
+        self.status_var.set(f"Saved PNG: {selected}")
+
+    def _draw_message(self, message: str) -> None:
+        self.ax.clear()
+        self.ax.text(
+            0.5,
+            0.5,
+            message,
+            transform=self.ax.transAxes,
+            ha="center",
+            va="center",
+            color="#556071",
+            fontsize=12,
+        )
+        self.ax.set_axis_off()
+        self.figure.tight_layout()
+        self.plot_canvas.draw_idle()
 
     def _draw_plot(
         self,
@@ -525,6 +653,8 @@ class PredictionViewer:
         y_true: list[float],
         y_pred: list[float],
         trial_name: str,
+        config_name: str,
+        unit: str,
     ) -> None:
         n = min(len(x_vals), len(y_true), len(y_pred))
         if n == 0:
@@ -541,94 +671,16 @@ class PredictionViewer:
             ys_true = y_true[:n]
             ys_pred = y_pred[:n]
 
-        width = max(1, self.canvas.winfo_width())
-        height = max(1, self.canvas.winfo_height())
-        self.canvas.delete("all")
-
-        pad_left = 66
-        pad_right = 24
-        pad_top = 42
-        pad_bottom = 52
-        plot_w = max(1, width - pad_left - pad_right)
-        plot_h = max(1, height - pad_top - pad_bottom)
-
-        x_min = min(xs)
-        x_max = max(xs)
-        y_all = ys_true + ys_pred
-        y_min = min(y_all)
-        y_max = max(y_all)
-        if x_max <= x_min:
-            x_max = x_min + 1.0
-        if y_max <= y_min:
-            y_max = y_min + 1.0
-
-        self.canvas.create_rectangle(
-            pad_left,
-            pad_top,
-            pad_left + plot_w,
-            pad_top + plot_h,
-            outline="#d6dbe5",
-            width=1,
-        )
-
-        for frac in (0.2, 0.4, 0.6, 0.8):
-            y = pad_top + frac * plot_h
-            self.canvas.create_line(
-                pad_left,
-                y,
-                pad_left + plot_w,
-                y,
-                fill="#edf0f5",
-                width=1,
-            )
-
-        def x_px(v: float) -> float:
-            return pad_left + ((v - x_min) / (x_max - x_min)) * plot_w
-
-        def y_px(v: float) -> float:
-            return pad_top + plot_h - ((v - y_min) / (y_max - y_min)) * plot_h
-
-        def polyline(points_x: list[float], points_y: list[float]) -> list[float]:
-            coords: list[float] = []
-            for vx, vy in zip(points_x, points_y):
-                coords.extend([x_px(vx), y_px(vy)])
-            return coords
-
-        true_coords = polyline(xs, ys_true)
-        pred_coords = polyline(xs, ys_pred)
-        if len(true_coords) >= 4:
-            self.canvas.create_line(*true_coords, fill="#1f77b4", width=2)
-        if len(pred_coords) >= 4:
-            self.canvas.create_line(*pred_coords, fill="#d62728", width=2)
-
-        self.canvas.create_text(
-            pad_left + plot_w / 2,
-            18,
-            text=f"{trial_name} | Ground truth vs prediction",
-            fill="#1f2937",
-            font=("TkDefaultFont", 12, "bold"),
-        )
-        self.canvas.create_text(
-            pad_left + plot_w / 2,
-            height - 18,
-            text=f"{x_label}: {x_min:.3f} to {x_max:.3f}",
-            fill="#4b5563",
-        )
-        self.canvas.create_text(
-            12,
-            pad_top + plot_h / 2,
-            text=f"deg\n{y_max:.3f}\n...\n{y_min:.3f}",
-            fill="#4b5563",
-            justify=tk.LEFT,
-            anchor="w",
-        )
-
-        legend_y = pad_top + 10
-        legend_x = pad_left + 10
-        self.canvas.create_line(legend_x, legend_y, legend_x + 24, legend_y, fill="#1f77b4", width=2)
-        self.canvas.create_text(legend_x + 30, legend_y, text="Ground truth", anchor="w")
-        self.canvas.create_line(legend_x + 138, legend_y, legend_x + 162, legend_y, fill="#d62728", width=2)
-        self.canvas.create_text(legend_x + 168, legend_y, text="Prediction", anchor="w")
+        self.ax.clear()
+        self.ax.plot(xs, ys_true, color="#1f77b4", linewidth=1.4, label="Ground truth")
+        self.ax.plot(xs, ys_pred, color="#d62728", linewidth=1.4, label="Prediction")
+        self.ax.set_title(f"{config_name} | {trial_name} | Ground truth vs prediction")
+        self.ax.set_xlabel(x_label)
+        self.ax.set_ylabel(f"Bending angle ({unit})")
+        self.ax.grid(True, linestyle="-", alpha=0.25)
+        self.ax.legend(loc="best")
+        self.figure.tight_layout()
+        self.plot_canvas.draw_idle()
 
 
 def main() -> int:
@@ -639,6 +691,11 @@ def main() -> int:
         help="Root directory containing experiment run directories.",
     )
     args = parser.parse_args()
+
+    if MATPLOTLIB_IMPORT_ERROR is not None:
+        print("Matplotlib is required for plotting. Install it with: pip install matplotlib", file=sys.stderr)
+        print(f"Import error: {MATPLOTLIB_IMPORT_ERROR}", file=sys.stderr)
+        return 1
 
     try:
         root = tk.Tk()
