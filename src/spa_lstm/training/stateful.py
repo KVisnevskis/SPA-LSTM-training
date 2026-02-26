@@ -45,13 +45,13 @@ def reset_recurrent_states(model) -> None:
 
 
 def as_sequence_batch(x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Convert [T,F], [T,1] to batch-first [1,T,F], [1,T,1]."""
+    """Convert [T,F], [T,1] to sample-stream batches [T,1,F], [T,1,1]."""
 
     if x.ndim != 2:
         raise ValueError(f"Expected x with shape [T,F], got {x.shape}")
     if y.ndim != 2:
         raise ValueError(f"Expected y with shape [T,1], got {y.shape}")
-    return x[None, ...], y[None, ...]
+    return x[:, None, :], y[:, None, :]
 
 
 def _current_learning_rate(model) -> float:

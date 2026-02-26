@@ -25,14 +25,18 @@ class _FakeModel:
         self._val_losses = iter(val_losses)
         self._weight = 0.0
         self.optimizer = type("Optimizer", (), {"learning_rate": 1e-3})()
+        self.fit_input_shapes: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
+        self.eval_input_shapes: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
 
     def fit(self, x, y, epochs, batch_size, shuffle, verbose):  # noqa: ANN001
         _ = (x, y, epochs, batch_size, shuffle, verbose)
+        self.fit_input_shapes.append((tuple(x.shape), tuple(y.shape)))
         self._weight += 1.0
         return _FakeHistory(next(self._train_losses))
 
     def evaluate(self, x, y, batch_size, verbose, return_dict=True):  # noqa: ANN001, ARG002
         _ = (x, y, batch_size, verbose)
+        self.eval_input_shapes.append((tuple(x.shape), tuple(y.shape)))
         loss = next(self._val_losses)
         return {"loss": loss, "rmse": loss + 0.1, "mae": loss + 0.2} if return_dict else [loss]
 
@@ -60,3 +64,5 @@ def test_stateful_training_resets_on_train_and_validation_boundaries() -> None:
     assert result.stopped_early is True
     assert result.best_weights[0][0] == 1.0
     assert model.layers[0].reset_count == 4
+    assert model.fit_input_shapes == [((3, 1, 2), (3, 1, 1)), ((3, 1, 2), (3, 1, 1))]
+    assert model.eval_input_shapes == [((3, 1, 2), (3, 1, 1)), ((3, 1, 2), (3, 1, 1))]
