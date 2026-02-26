@@ -27,6 +27,7 @@ Run utility commands:
 python3 scripts/inspect_hdf5.py --h5 outputs/preprocessed_all_trials.h5
 python3 scripts/train.py --config configs/experiments/thesis_slm_lstm.yaml
 python3 scripts/evaluate.py --config configs/experiments/thesis_slm_lstm.yaml
+python3 scripts/view_predictions.py --root outputs/experiments
 ```
 
 ## Data Prerequisite
@@ -38,4 +39,3 @@ Raw datasets are not tracked in git. See preprocessing handoff notes in `context
 Use this document as source of truth for implementation details:
 
 - `docs/specs/lstm_training_spec.md`
-
