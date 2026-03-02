@@ -1,0 +1,47 @@
+name: baseline_slu_lstm
+
+data:
+  h5_path: outputs/preprocessed_all_trials.h5
+  features: [pressure]
+  target: phi
+  train_runs:
+    - Freehand_tt_1
+    - Freehand_static_03V_1
+    - Freehand_static_09V_1
+    - Freehand_sin_1
+    - run_0roll_0pitch_tt_1
+  val_runs:
+    - Freehand_tt_2
+    - Freehand_static_03V_2
+    - Freehand_static_09V_2
+    - Freehand_sin_2
+    - run_0roll_0pitch_tt_2
+  eval_runs:
+    - run_0roll_90pitch_tt_1
+    - Freehand_tt_3
+    - Freehand_static_03V_3
+    - Freehand_static_06V_3
+    - Freehand_static_09V_3
+    - Freehand_sin_3
+  scaling:
+    mode: prescaled
+    output_min: -1.0
+    output_max: 1.0
+
+model:
+  variant: slu_lstm
+  learning_rate: 0.001
+
+training:
+  epochs: 500
+  patience: 20
+  batch_size: 1
+  stateful: true
+  seed: 42
+
+runtime:
+  output_dir: outputs/experiments/baseline
+  run_name: baseline_slu_lstm
+  save_best_path: best.keras
+  save_final_path: final.keras
+  bounds_path: scaler_bounds.json
