@@ -19,6 +19,11 @@ def main() -> int:
         action="store_true",
         help="Resume training from latest checkpoint in the run output directory.",
     )
+    parser.add_argument(
+        "--allow-overwrite",
+        action="store_true",
+        help="Allow training into an existing non-empty run directory (disabled by default).",
+    )
     args = parser.parse_args()
 
     from spa_lstm.config import load_experiment_config
@@ -26,6 +31,13 @@ def main() -> int:
 
     cfg = load_experiment_config(args.config)
     output_dir = Path(cfg.runtime.output_dir) / cfg.runtime.run_name
+    if output_dir.exists() and any(output_dir.iterdir()) and not args.resume and not args.allow_overwrite:
+        print(
+            f"Run directory already exists and is non-empty: {output_dir}. "
+            "Use --resume to continue, or --allow-overwrite to bypass this safety check.",
+            file=sys.stderr,
+        )
+        return 1
     try:
         out_dir = run_training(cfg, resume=args.resume)
     except Exception as exc:
