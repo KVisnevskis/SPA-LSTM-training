@@ -24,12 +24,57 @@ def main() -> int:
         action="store_true",
         help="Allow training into an existing non-empty run directory (disabled by default).",
     )
+    parser.add_argument(
+        "--verbose",
+        "--training-verbose",
+        dest="training_verbose",
+        type=int,
+        default=None,
+        help="Override training.verbose from config (e.g. 1).",
+    )
+    parser.add_argument(
+        "--fit-verbose",
+        type=int,
+        choices=(0, 1, 2),
+        default=None,
+        help="Override training.fit_verbose from config.",
+    )
+    parser.add_argument(
+        "--eval-verbose",
+        type=int,
+        choices=(0, 1, 2),
+        default=None,
+        help="Override training.eval_verbose from config.",
+    )
+    parser.add_argument(
+        "--log-each-fit",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Override training.log_each_fit from config.",
+    )
     args = parser.parse_args()
 
     from spa_lstm.config import load_experiment_config
     from spa_lstm.training.workflow import run_training
 
     cfg = load_experiment_config(args.config)
+    if args.training_verbose is not None:
+        cfg.training.verbose = int(args.training_verbose)
+    if args.fit_verbose is not None:
+        cfg.training.fit_verbose = int(args.fit_verbose)
+    if args.eval_verbose is not None:
+        cfg.training.eval_verbose = int(args.eval_verbose)
+    if args.log_each_fit is not None:
+        cfg.training.log_each_fit = bool(args.log_each_fit)
+
+    print(
+        "training flags: "
+        f"verbose={cfg.training.verbose}, "
+        f"fit_verbose={cfg.training.fit_verbose}, "
+        f"eval_verbose={cfg.training.eval_verbose}, "
+        f"log_each_fit={cfg.training.log_each_fit}"
+    )
+
     output_dir = Path(cfg.runtime.output_dir) / cfg.runtime.run_name
     if output_dir.exists() and any(output_dir.iterdir()) and not args.resume and not args.allow_overwrite:
         print(

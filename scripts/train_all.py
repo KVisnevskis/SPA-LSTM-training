@@ -140,7 +140,7 @@ def main() -> int:
 
             # Best-effort traceback persistence aligned with single-config script behavior.
             try:
-                if cfg is not None:
+                if cfg is not None and not isinstance(exc, FileExistsError):
                     output_dir = Path(cfg.runtime.output_dir) / cfg.runtime.run_name
                     output_dir.mkdir(parents=True, exist_ok=True)
                     error_log = output_dir / "training_error.log"
