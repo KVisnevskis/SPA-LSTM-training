@@ -17,7 +17,7 @@ The repo now contains:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .[dev]
+pip install -e .[dev,train,viz]
 pytest -q
 ```
 
