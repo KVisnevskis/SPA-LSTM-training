@@ -81,3 +81,73 @@ def test_evaluate_model_uses_prescaled_bounds_and_stream_shape(tmp_path, monkeyp
     assert len(metrics) == 1
     assert metrics[0]["run_key"] == "eval_a"
     assert metrics[0]["n_samples"] == 3
+    assert metrics[0]["split_role"] == "eval"
+
+
+def test_evaluate_model_all_scope_tracks_split_roles(tmp_path, monkeypatch) -> None:
+    h5_path = tmp_path / "dataset.h5"
+    h5_path.write_text("", encoding="utf-8")
+
+    cfg = ExperimentConfig(
+        name="eval_all_smoke",
+        data=DataConfig(
+            h5_path=str(h5_path),
+            features=["pressure", "acc_x", "acc_y", "acc_z"],
+            target="phi",
+            train_runs=["train_a"],
+            val_runs=["val_a"],
+            eval_runs=["eval_a"],
+            scaling=ScalingConfig(mode="prescaled", output_min=-1.0, output_max=1.0),
+        ),
+        model=ModelConfig(variant="slm_lstm", learning_rate=1e-3),
+        runtime=RuntimeConfig(output_dir=str(tmp_path / "outputs"), run_name="eval_all_smoke"),
+    )
+
+    shared_df = pd.DataFrame(
+        {
+            "pressure": [0.0, 0.2],
+            "acc_x": [0.1, 0.2],
+            "acc_y": [0.2, 0.1],
+            "acc_z": [1.0, 1.1],
+            "phi": [-1.0, 1.0],
+            "Time": [0.0, 0.02],
+        }
+    )
+    monkeypatch.setattr(
+        "spa_lstm.evaluation.workflow.list_run_keys",
+        lambda _h5: ["train_a", "val_a", "eval_a", "unseen_a"],
+    )
+    monkeypatch.setattr(
+        "spa_lstm.evaluation.workflow.load_runs_as_dataframes",
+        lambda _h5, run_keys, _required: {run_key: shared_df.copy() for run_key in run_keys},
+    )
+    monkeypatch.setattr(
+        "spa_lstm.evaluation.workflow.load_hdf5_scaler_bounds",
+        lambda _h5, columns: {
+            "pressure": SimpleNamespace(lo=-1.0, hi=1.0),
+            "acc_x": SimpleNamespace(lo=-1.0, hi=1.0),
+            "acc_y": SimpleNamespace(lo=-1.0, hi=1.0),
+            "acc_z": SimpleNamespace(lo=-1.0, hi=1.0),
+            "phi": SimpleNamespace(lo=-30.0, hi=30.0),
+        },
+    )
+
+    fake_model = _FakeModel()
+    fake_tf = SimpleNamespace(keras=SimpleNamespace(models=SimpleNamespace(load_model=lambda _path: fake_model)))
+    monkeypatch.setitem(sys.modules, "tensorflow", fake_tf)
+
+    out_dir = tmp_path / "outputs" / "eval_all_smoke"
+    metrics_path = evaluate_model(cfg, model_path="dummy.keras", run_dir=str(out_dir), scope="all")
+
+    assert metrics_path == out_dir / "eval_metrics_all_runs.json"
+    assert metrics_path.exists()
+    assert (out_dir / "predictions_all_runs" / "train_a.csv").exists()
+    assert (out_dir / "eval_summary_all_runs.json").exists()
+
+    with metrics_path.open("r", encoding="utf-8") as f:
+        metrics = json.load(f)
+    role_by_run = {row["run_key"]: row["split_role"] for row in metrics}
+    assert role_by_run["train_a"] == "train"
+    assert role_by_run["val_a"] == "val"
+    assert role_by_run["eval_a"] == "eval"
+    assert role_by_run["unseen_a"] == "unseen"

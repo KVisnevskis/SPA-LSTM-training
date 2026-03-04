@@ -18,6 +18,12 @@ def main() -> int:
         default=None,
         help="Optional run directory override. Defaults to <output_dir>/<run_name> from config.",
     )
+    parser.add_argument(
+        "--scope",
+        choices=("eval", "all"),
+        default="eval",
+        help="Evaluation scope: 'eval' for config eval runs, 'all' for all HDF5 runs.",
+    )
     args = parser.parse_args()
 
     from spa_lstm.config import load_experiment_config
@@ -31,7 +37,7 @@ def main() -> int:
         print(f"Best model not found: {model_path}", file=sys.stderr)
         return 1
 
-    metrics_path = evaluate_model(cfg, str(model_path), str(run_dir))
+    metrics_path = evaluate_model(cfg, str(model_path), str(run_dir), scope=args.scope)
     print(f"Evaluation complete. Model: {model_path}")
     print(f"Metrics file: {metrics_path}")
     return 0
