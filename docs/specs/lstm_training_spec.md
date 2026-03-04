@@ -1,299 +1,256 @@
-# SPA LSTM Training Specification
+# SPA LSTM Training/Evaluation Specification (Implementation Snapshot)
 
-Status: Draft baseline specification for LSTM based on legacy implementation
+Status: Active implementation reference.
+
+This document describes how training and evaluation currently work in this repository. It is intentionally implementation-first and should be updated as behavior changes.
 
 ## 1. Purpose
-This document defines the technical specification for a rigorous, reproducible LSTM training pipeline that estimates SPA bending angle (`phi`) from onboard pressure and IMU data.
 
-It is the core implementation reference for this repository.
+Define the current, reproducible workflow for:
 
-## 2. Sources and Precedence
-Implementation choices in this spec are derived from:
+1. Training thesis-aligned stateful LSTM baselines for `phi`.
+2. Evaluating trained models on configured eval runs and on all available runs.
+3. Persisting artifacts needed for analysis and thesis reporting.
 
-1. Thesis material in `context/KJ_Thesis.zip` (primary source for architecture intent).
-2. Prior implementations:
-   - Attempt 1: `context/colab_LSTM.zip`
-   - Attempt 2: `context/wsl_LSTM_legacy.zip`
-3. Preprocessing handoff: `context/lstm_baseline_handoff.md`
+## 2. Data Contract
 
-When sources conflict, precedence is:
+## 2.1 Input dataset
 
-1. Thesis intent and methodology.
-2. Data contract from preprocessing handoff.
-3. Legacy implementation behavior.
-
-## 3. Objectives
-The pipeline must:
-
-1. Train and evaluate LSTM models for `phi` estimation using synchronized 48 Hz data.
-2. Reproduce thesis-style baseline experiments (stateful sequential training, batch size 1).
-3. Eliminate ambiguous training behavior (data leakage, undocumented splits, hidden defaults).
-4. Produce traceable artifacts (configs, checkpoints, metrics, predictions, metadata).
-5. Support extension for additional features (gyro, cascaded models, alternative architectures).
-
-## 4. Non-Goals (Baseline)
-This baseline spec does not require:
-
-1. Real-time embedded deployment.
-2. Hyperparameter search automation.
-3. Multi-objective loss across `phi/theta/psi`.
-4. Distributed training.
-
-## 5. Data Contract
-
-### 5.1 Upstream data source
-Expected input is a preprocessed HDF5 produced by preprocessing stage, default path:
+Expected HDF5 path is configured per experiment (`data.h5_path`), typically:
 
 - `outputs/preprocessed_all_trials.h5`
 
-Raw CSV ingestion is out-of-scope for this repo's baseline.
+## 2.2 HDF5 structure
 
-### 5.2 HDF5 layout
-Primary expected layout (handoff):
+Current loader expects run tables at:
 
-- Per-run tables: `/runs/<normalized_run_key>`
-- Metadata tables:
-  - `/meta/runs`
-  - `/meta/run_logs`
-  - `/meta/run_scaling`
-  - `/meta/scaler_parameters`
-  - `/meta/calibration`
-  - `/meta/export_settings`
+- `/runs/<run_key>`
 
-The loader must also support legacy flat keys (e.g. `/sFreehand_tt_1`) for backward compatibility.
+Metadata used by this repo:
 
-### 5.3 Required columns
-Minimum required for multivariate baseline:
+- `/meta/scaler_parameters` (for min/max de-scaling bounds)
 
-- `pressure`
-- `acc_x`
-- `acc_y`
-- `acc_z`
-- `phi`
+## 2.3 Required columns
 
-Recommended retained for diagnostics:
+For a given config, each selected run must contain:
 
-- `Time`
-- `theta`, `psi`
-- other columns from preprocessing schema
+1. All configured feature columns (`data.features`).
+2. The configured target column (`data.target`, baseline: `phi`).
 
-### 5.4 Temporal semantics
+`Time` is optional but included in prediction CSV output if present.
 
-1. Default sampling rate is 48 Hz after 240 Hz -> moving-average + decimation by 5.
-2. `Time` is seconds from run start (rebased).
-3. Runs are independent sequences; windows must never cross run boundaries.
+## 3. Configuration Contract
 
-## 6. Feature, Target, and Scaling Policies
+Experiment YAML sections:
 
-### 6.1 Baseline features and target
+1. `data`
+2. `model`
+3. `training`
+4. `runtime`
 
-1. Multivariate feature set (thesis primary): `pressure`, `acc_x`, `acc_y`, `acc_z`.
-2. Univariate comparison feature set: `pressure`.
-3. Target: `phi` (major bending axis).
+Relevant constraints:
 
-### 6.2 Scaling policy modes
-The implementation must support three explicit scaling modes:
+1. `data.scaling.mode` must be `prescaled`.
+2. `training.stateful=true` requires `training.batch_size=1`.
+3. `data.train_runs` and `data.val_runs` must be non-empty and equal length.
+4. Split overlap between train/val/eval is rejected in training preflight checks.
 
-1. `fixed_bounds_thesis` (default for thesis reproduction)
-2. `fit_train_only_minmax` (strict anti-leakage mode)
-3. `passthrough` (when upstream export already applies approved scaling)
+## 4. Model Variants
 
-### 6.3 Fixed bounds (thesis-compatible constants)
-From legacy training scripts used to reproduce thesis results:
+Supported variants:
 
-- Accelerometer (m/s^2): `[-12, 12]`
-- Pressure: `[400, 1800]`
-- Target phi (deg): `[-200, 50]`
-- Mapped range for scaled values: `[-1, 1]`
+1. `slm_lstm` (single-layer multivariate, 512 units)
+2. `tlm_lstm` (two-layer multivariate, 256+256 units)
+3. `slu_lstm` (single-layer univariate, 512 units)
+4. `tlu_lstm` (two-layer univariate, 256+256 units)
 
-Behavioral requirement:
+Compile settings:
 
-1. If raw accelerometer is in `g`, convert to m/s^2 before scaling.
-2. Bounds must be persisted into run artifacts.
-3. Denormalization for reporting must use the same bounds.
+1. Optimizer: Adam (`model.learning_rate`)
+2. Loss: MSE
+3. Metrics: RMSE, MAE
 
-### 6.4 Leakage controls
+## 5. Training Workflow
 
-1. Split must be run-level, not row-level.
-2. If scaler fitting is used, fit strictly on training runs only.
-3. Scaling mode must be recorded in manifest and metrics output.
+Primary entry points:
 
-## 7. Model Variants
+1. `scripts/train.py` (single config)
+2. `scripts/train_all.py` (directory of configs)
 
-### 7.1 Required architectures
-As defined in thesis methodology:
+## 5.1 Training loop semantics
 
-1. `SLM-LSTM`: single-layer multivariate LSTM
-2. `TLM-LSTM`: two-layer multivariate LSTM
-3. `SLU-LSTM`: single-layer univariate LSTM
-4. `TLU-LSTM`: two-layer univariate LSTM
+For each paired `(train_run_i, val_run_i)`:
 
-### 7.2 Baseline layer specs
+1. Convert features/target from `[T,F]` and `[T,1]` to stream batches `[T,1,F]` and `[T,1,1]`.
+2. Reset recurrent states.
+3. `model.fit(..., epochs=1, batch_size=1, shuffle=False)`.
+4. Reset recurrent states.
+5. `model.evaluate(..., batch_size=1, return_dict=True)`.
 
-1. Single-layer models: 1 LSTM layer, 512 units, `tanh`, Dense(1) output.
-2. Two-layer models: 2 LSTM layers, 256 units each, Dense(1) output.
-3. Loss: MSE.
-4. Optimizer: Adam, LR = 1e-3.
+Epoch-level metrics are means across all run pairs:
 
-### 7.3 Stateful baseline behavior
-For thesis-aligned baseline runs:
+1. `train_loss_mean`, `train_rmse_mean`, `train_mae_mean`
+2. `val_loss_mean`, `val_rmse_mean`, `val_mae_mean`
 
-1. Use stateful LSTM configuration.
-2. Batch size fixed at 1.
-3. Process each run as one continuous sequence.
-4. Reset recurrent states at run boundaries.
+Early stopping:
 
-## 8. Dataset Splitting Strategy
+1. Monitor: `val_loss_mean`
+2. Trigger: `patience` consecutive non-improving epochs
 
-### 8.1 Split granularity
+## 5.2 Resume/checkpoint behavior
 
-- Splits are by run identity (entire runs), never by time rows.
+During training, each epoch writes:
 
-### 8.2 Thesis-aligned train/validation pairing
-Training is paired by condition (train repetition + validation repetition from same condition family), including:
+1. `latest.keras` (latest model state)
+2. `resume_state.json` (next epoch + best metadata + epoch history)
+3. `best.keras` when the current epoch is best so far
 
-1. One fixed-orientation predefined trajectory pair.
-2. Dynamic predefined trajectory pair.
-3. Dynamic low-pressure hold pair (~15 kPa family).
-4. Dynamic higher-pressure hold pair (~45 kPa family).
-5. Dynamic sinusoidal pair.
+At run end:
 
-Implementation detail:
+1. `final.keras` is saved from latest state.
+2. Best weights are restored and `best.keras` is written again.
 
-- Because dataset IDs differ between tables/scripts (indexing conventions), run-key resolution must come from `/meta/runs` metadata plus config-defined selection criteria, not hardcoded numeric assumptions.
+Resume path:
 
-### 8.3 Evaluation split
-Evaluation set must include unseen runs across:
+1. `--resume` loads `latest.keras` + `resume_state.json` if present.
+2. Best weights are restored from `best.keras` when available.
 
-1. Fixed orientation not used in training.
-2. Dynamic predefined trajectory unseen repetition.
-3. Novel static pressure levels (including 30 kPa family where available).
-4. Sinusoidal unseen repetition.
+## 5.3 Training artifacts
 
-## 9. Training Loop Specification
+Written under:
 
-### 9.1 Epoch routine (stateful profile)
-For each epoch:
+- `<runtime.output_dir>/<runtime.run_name>/`
 
-1. Iterate training run list in fixed deterministic order.
-2. Before each run: reset model recurrent states.
-3. Train exactly one pass on full run sequence.
-4. Evaluate on paired validation run sequence.
-5. Aggregate validation loss across all pairs.
+Artifacts:
 
-### 9.2 Early stopping and checkpoints
+1. `best.keras`
+2. `final.keras`
+3. `latest.keras`
+4. `history.csv`
+5. `training_summary.json`
+6. `run_manifest.json`
+7. `config_snapshot.json`
+8. `resume_state.json`
+9. `scaler_bounds.json`
+10. `resource_usage.csv` (if monitor starts successfully)
+11. `training_error.log` (on failure)
 
-1. Early stopping monitor: aggregate validation loss.
-2. Patience: 10 epochs without improvement (thesis criterion).
-3. Save best model checkpoint.
-4. Save periodic checkpoints (configurable).
+## 5.4 Resource monitoring
 
-### 9.3 Reproducibility
+Resource monitor samples on a background thread and writes:
 
-1. Seed Python, NumPy, TensorFlow RNGs.
-2. Persist exact config snapshot per run.
-3. Log environment (Python/TensorFlow/CUDA/GPU info).
-4. Record git commit hash and dirty flag.
+1. CPU percent
+2. RAM percent
+3. GPU utilization and memory (via `nvidia-smi` when available)
 
-## 10. Inference and Evaluation Specification
+Sampling interval has a hard minimum of 15 seconds.
 
-### 10.1 Inference mode
+## 6. Evaluation Workflow
 
-1. Use stateful inference for thesis profile.
-2. Reset states at each new run.
-3. No future-sample leakage during prediction.
+Primary entry points:
 
-### 10.2 Required metrics
+1. `scripts/evaluate.py` (explicit model path)
+2. `scripts/evaluate_best.py` (best model for one config)
+3. `scripts/evaluate_all.py` (best models for all configs in a directory)
 
-1. RMSE (primary, in degrees).
-2. MAE (secondary, in degrees).
-3. Optional per-run MSE for debugging parity.
+## 6.1 Evaluation scopes
 
-### 10.3 Required outputs
-Per experiment run, emit:
+`evaluate_model(..., scope=...)` supports:
 
-1. `metrics.json` with per-run and aggregate metrics.
-2. `predictions.h5` (or CSV bundle) with:
-   - run key
-   - time index / `Time`
-   - `phi_true_deg`
-   - `phi_pred_deg`
-3. Training history log.
-4. Best checkpoint path.
+1. `scope="eval"`: evaluate only config `data.eval_runs`
+2. `scope="all"`: evaluate all run keys discovered under `/runs/*`
 
-## 11. Repository Architecture (Target Scaffold)
+## 6.2 Inference behavior
 
-### 11.1 High-level layout
+Per run:
 
-- `configs/` for experiment and data definitions.
-- `docs/specs/` for normative docs.
-- `scripts/` for user entry points.
-- `src/spa_lstm/` for importable package.
-- `tests/` for unit and contract tests.
+1. Features/target are reshaped to stream batches `[T,1,F]` and `[T,1,1]`.
+2. Recurrent states are reset at run start.
+3. Predictions are generated with `batch_size=1`.
+4. Target/predictions are de-scaled using bounds from:
+   - `<run_dir>/scaler_bounds.json` if present, else
+   - `/meta/scaler_parameters` from HDF5.
 
-### 11.2 Package modules
+## 6.3 Per-run metadata in metrics
 
-1. `spa_lstm.data`
-   - HDF5 loading and schema validation
-   - split resolution
-   - scaling utilities
-2. `spa_lstm.models`
-   - architecture factory for the four model variants
-3. `spa_lstm.training`
-   - stateful trainer orchestration
-   - callbacks/checkpoint policy
-4. `spa_lstm.evaluation`
-   - metrics
-   - prediction export
+Each run record includes:
 
-## 12. Configuration Requirements
+1. `split_role`: `train`, `val`, `eval`, `unseen`, or `overlap`
+2. `is_train_run`, `is_val_run`, `is_eval_run`, `is_unseen_run`
+3. `motion_type`: `static`/`dynamic`
+4. `n_samples`
+5. `rmse`, `mae`
+6. Legacy-compatible aliases: `rmse_deg`, `mae_deg`
+7. `prediction_csv` path
 
-Configurations must be declarative and versioned. Minimum config domains:
+## 6.4 Evaluation outputs
 
-1. Data source + split selectors.
-2. Feature/target selection.
-3. Scaling mode and bounds.
-4. Model variant and hyperparameters.
-5. Training controls (epochs, patience, checkpoint cadence).
-6. Output paths and run naming.
+For `scope="eval"`:
 
-## 13. Engineering Quality Requirements
+1. `eval_metrics.json`
+2. `eval_summary.json`
+3. `predictions/<run_key>.csv`
 
-### 13.1 Validation and tests
-At minimum:
+For `scope="all"`:
 
-1. Unit tests for scaling and denormalization correctness.
-2. Unit tests for metric functions.
-3. Loader tests for key resolution (legacy and `/runs/*` layouts).
-4. Smoke test script for TensorFlow GPU availability (already present).
+1. `eval_metrics_all_runs.json`
+2. `eval_summary_all_runs.json`
+3. `predictions_all_runs/<run_key>.csv`
 
-### 13.2 Logging and observability
+Summary files include:
 
-1. Structured logging for run lifecycle events.
-2. Persist per-epoch metrics and learning rate.
-3. Save full exception traceback to run log directory on failure.
+1. Overall weighted RMSE/MAE
+2. Aggregation by `split_role`
+3. Aggregation by `motion_type`
 
-### 13.3 Failure handling
-Fail fast with clear messages for:
+## 7. CLI Reference
 
-1. Missing required columns.
-2. Empty run selections.
-3. Unknown run keys.
-4. Invalid scaling mode.
+## 7.1 Train one config
 
-## 14. Acceptance Criteria
-This specification is satisfied when the scaffolded codebase can:
+```bash
+.venv/bin/python scripts/train.py --config <config.yaml> [--resume]
+```
 
-1. Validate and load HDF5 runs with documented schema checks.
-2. Materialize thesis baseline config profiles without code edits.
-3. Train a stateful baseline model end-to-end from config.
-4. Export per-run predictions and RMSE/MAE metrics.
-5. Re-run the same config reproducibly with traceable artifacts.
+Optional training overrides:
 
-## 15. Planned Implementation Phases
+- `--verbose`
+- `--fit-verbose`
+- `--eval-verbose`
+- `--log-each-fit` / `--no-log-each-fit`
 
-1. Phase 1: data contract + config plumbing + loader/scaler tests.
-2. Phase 2: model factory + stateful trainer core.
-3. Phase 3: evaluation/export + reproducibility metadata.
-4. Phase 4: parity checks versus legacy scripts and thesis plots.
+## 7.2 Train all configs in directory
 
+```bash
+.venv/bin/python scripts/train_all.py --config-dir <dir> [--resume]
+```
+
+## 7.3 Evaluate one model
+
+```bash
+.venv/bin/python scripts/evaluate.py \
+  --config <config.yaml> \
+  --model <model.keras> \
+  [--scope eval|all]
+```
+
+## 7.4 Evaluate best model for one config
+
+```bash
+.venv/bin/python scripts/evaluate_best.py \
+  --config <config.yaml> \
+  [--scope eval|all]
+```
+
+## 7.5 Evaluate all best models in a directory
+
+```bash
+.venv/bin/python scripts/evaluate_all.py \
+  --config-dir <dir> \
+  [--scope eval|all]
+```
+
+## 8. Known Current Limitations
+
+1. Only `prescaled` scaling mode is supported.
+2. Metric/prediction field names retain legacy `*_deg` suffixes for compatibility.
+3. Full `scope="all"` evaluation can be long-running on large datasets.
