@@ -15,13 +15,19 @@ def main() -> int:
     parser.add_argument("--config", required=True, help="Path to experiment config YAML.")
     parser.add_argument("--model", required=True, help="Path to trained Keras model file.")
     parser.add_argument("--run-dir", default=None, help="Optional output directory override.")
+    parser.add_argument(
+        "--scope",
+        choices=("eval", "all"),
+        default="eval",
+        help="Evaluation scope: 'eval' for config eval runs, 'all' for all HDF5 runs.",
+    )
     args = parser.parse_args()
 
     from spa_lstm.config import load_experiment_config
     from spa_lstm.evaluation.workflow import evaluate_model
 
     cfg = load_experiment_config(args.config)
-    metrics_path = evaluate_model(cfg, args.model, args.run_dir)
+    metrics_path = evaluate_model(cfg, args.model, args.run_dir, scope=args.scope)
     print(f"Evaluation complete. Metrics file: {metrics_path}")
     return 0
 
