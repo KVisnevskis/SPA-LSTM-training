@@ -26,6 +26,7 @@ except ImportError as exc:  # pragma: no cover - runtime dependency
 PRED_TRUE_COL = "phi_true_deg"
 PRED_PRED_COL = "phi_pred_deg"
 PRED_TIME_COL = "Time"
+PREDICTION_DIR_CANDIDATES = ("predictions", "predictions_all_runs")
 MAX_PLOT_POINTS = 2400
 RAD_TO_DEG = 180.0 / math.pi
 ANGLE_UNIT_OPTIONS = ("degrees", "radians")
@@ -87,18 +88,31 @@ def _discover_runs(root: Path) -> dict[str, Path]:
     runs: dict[str, Path] = {}
     if not root.exists():
         return runs
-    for entry in sorted(root.iterdir()):
-        if not entry.is_dir():
-            continue
-        pred_dir = entry / "predictions"
-        if pred_dir.is_dir() and any(pred_dir.glob("*.csv")):
-            runs[entry.name] = entry
+
+    run_dirs: set[Path] = set()
+    for pred_dir_name in PREDICTION_DIR_CANDIDATES:
+        for pred_dir in root.rglob(pred_dir_name):
+            if pred_dir.is_dir() and any(pred_dir.glob("*.csv")):
+                run_dirs.add(pred_dir.parent)
+
+    for run_dir in sorted(run_dirs, key=lambda path: path.relative_to(root).as_posix()):
+        rel = run_dir.relative_to(root).as_posix()
+        label = rel if rel != "." else run_dir.name
+        runs[label] = run_dir
     return runs
 
 
+def _prediction_dir(run_dir: Path) -> Path | None:
+    for dir_name in PREDICTION_DIR_CANDIDATES:
+        pred_dir = run_dir / dir_name
+        if pred_dir.is_dir() and any(pred_dir.glob("*.csv")):
+            return pred_dir
+    return None
+
+
 def _trial_names(run_dir: Path) -> list[str]:
-    pred_dir = run_dir / "predictions"
-    if not pred_dir.exists():
+    pred_dir = _prediction_dir(run_dir)
+    if pred_dir is None:
         return []
     return sorted(path.stem for path in pred_dir.glob("*.csv"))
 
@@ -419,7 +433,7 @@ class PredictionViewer:
         if not model_names:
             self._set_info(
                 f"No run directories with prediction CSVs found in:\n{self.experiments_root}\n\n"
-                "Expected: <run_dir>/predictions/*.csv"
+                "Expected: <run_dir>/predictions/*.csv or <run_dir>/predictions_all_runs/*.csv"
             )
             self._draw_message("No run data found")
             return
@@ -452,7 +466,14 @@ class PredictionViewer:
         if self.current_run is None:
             return
 
-        trial_path = self.current_run / "predictions" / f"{trial_name}.csv"
+        pred_dir = _prediction_dir(self.current_run)
+        if pred_dir is None:
+            self.current_trial_data = None
+            self._set_info(f"Run has no prediction directory:\n{self.current_run}")
+            self._draw_message("Missing predictions directory")
+            return
+
+        trial_path = pred_dir / f"{trial_name}.csv"
         if not trial_path.exists():
             self.current_trial_data = None
             self._set_info(f"Missing prediction file:\n{trial_path}")
