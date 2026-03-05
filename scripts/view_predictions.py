@@ -41,6 +41,13 @@ class TrialStats:
     bias_deg: float
 
 
+@dataclass(frozen=True)
+class RunEntry:
+    run_dir: Path
+    predictions_dir: Path
+    scope_label: str
+
+
 def _safe_float(raw: str | None) -> float | None:
     if raw is None:
         return None
@@ -84,38 +91,83 @@ def _read_json(path: Path) -> Any | None:
         return json.load(f)
 
 
-def _discover_runs(root: Path) -> dict[str, Path]:
-    runs: dict[str, Path] = {}
+def _discover_runs(root: Path) -> dict[str, RunEntry]:
+    runs: dict[str, RunEntry] = {}
     if not root.exists():
         return runs
 
-    run_dirs: set[Path] = set()
     for pred_dir_name in PREDICTION_DIR_CANDIDATES:
         for pred_dir in root.rglob(pred_dir_name):
             if pred_dir.is_dir() and any(pred_dir.glob("*.csv")):
-                run_dirs.add(pred_dir.parent)
+                run_dir = pred_dir.parent
+                rel = run_dir.relative_to(root).as_posix()
+                run_label = rel if rel != "." else run_dir.name
+                scope_label = "eval" if pred_dir_name == "predictions" else "all_runs"
+                label = f"{run_label} [{scope_label}]"
+                runs[label] = RunEntry(
+                    run_dir=run_dir,
+                    predictions_dir=pred_dir,
+                    scope_label=scope_label,
+                )
 
-    for run_dir in sorted(run_dirs, key=lambda path: path.relative_to(root).as_posix()):
-        rel = run_dir.relative_to(root).as_posix()
-        label = rel if rel != "." else run_dir.name
-        runs[label] = run_dir
-    return runs
-
-
-def _prediction_dir(run_dir: Path) -> Path | None:
-    for dir_name in PREDICTION_DIR_CANDIDATES:
-        pred_dir = run_dir / dir_name
-        if pred_dir.is_dir() and any(pred_dir.glob("*.csv")):
-            return pred_dir
-    return None
+    return dict(sorted(runs.items(), key=lambda item: item[0].lower()))
 
 
-def _trial_names(run_dir: Path) -> list[str]:
-    pred_dir = _prediction_dir(run_dir)
-    if pred_dir is None:
+def _trial_names(predictions_dir: Path) -> list[str]:
+    if not predictions_dir.is_dir():
         return []
-    return sorted(path.stem for path in pred_dir.glob("*.csv"))
+    return sorted(path.stem for path in predictions_dir.glob("*.csv"))
 
+
+def _eval_artifacts(run_dir: Path, scope_label: str) -> tuple[Path, Path]:
+    if scope_label == "all_runs":
+        return run_dir / "eval_metrics_all_runs.json", run_dir / "eval_summary_all_runs.json"
+    return run_dir / "eval_metrics.json", run_dir / "eval_summary.json"
+
+
+def _run_metadata(run_dir: Path, scope_label: str) -> dict[str, Any]:
+    eval_metrics_path, eval_summary_path = _eval_artifacts(run_dir, scope_label)
+    manifest = _read_json(run_dir / "run_manifest.json")
+    training_summary = _read_json(run_dir / "training_summary.json")
+    config_snapshot = _read_json(run_dir / "config_snapshot.json")
+    eval_metrics = _read_json(eval_metrics_path)
+    eval_summary = _read_json(eval_summary_path)
+
+    manifest = manifest if isinstance(manifest, dict) else {}
+    training_summary = training_summary if isinstance(training_summary, dict) else {}
+    config_snapshot = config_snapshot if isinstance(config_snapshot, dict) else {}
+    eval_summary = eval_summary if isinstance(eval_summary, dict) else {}
+
+    model_cfg = config_snapshot.get("model", {}) if isinstance(config_snapshot.get("model"), dict) else {}
+    training_cfg = config_snapshot.get("training", {}) if isinstance(config_snapshot.get("training"), dict) else {}
+    data_cfg = config_snapshot.get("data", {}) if isinstance(config_snapshot.get("data"), dict) else {}
+
+    raw_best_epoch = training_summary.get("best_epoch")
+    best_epoch = int(raw_best_epoch) if isinstance(raw_best_epoch, (int, float)) else None
+
+    overall_eval = eval_summary.get("overall")
+    if not isinstance(overall_eval, dict):
+        overall_eval = _weighted_eval_summary(eval_metrics)
+
+    return {
+        "eval_metrics": eval_metrics,
+        "scope_label": scope_label,
+        "config_name": config_snapshot.get("name", manifest.get("config_name", run_dir.name)),
+        "best_epoch": best_epoch,
+        "best_val_loss": training_summary.get("best_val_loss"),
+        "epochs_completed": training_summary.get("epochs_completed"),
+        "stopped_early": training_summary.get("stopped_early"),
+        "best_history_row": _read_history_row(run_dir / "history.csv", best_epoch),
+        "model_variant": model_cfg.get("variant", manifest.get("model_variant")),
+        "learning_rate": model_cfg.get("learning_rate"),
+        "features": data_cfg.get("features", manifest.get("features", [])),
+        "target": data_cfg.get("target", manifest.get("target")),
+        "batch_size": training_cfg.get("batch_size"),
+        "stateful": training_cfg.get("stateful"),
+        "patience": training_cfg.get("patience"),
+        "seed": training_cfg.get("seed"),
+        "overall_eval": overall_eval,
+    }
 
 def _read_history_row(path: Path, best_epoch: int | None) -> dict[str, float | int] | None:
     if best_epoch is None or not path.exists():
@@ -167,43 +219,6 @@ def _weighted_eval_summary(eval_metrics: Any) -> dict[str, float | int] | None:
         "n_samples": n_samples_total,
         "weighted_rmse_rad": weighted_rmse_rad,
         "weighted_mae_rad": weighted_mae_rad,
-    }
-
-
-def _run_metadata(run_dir: Path) -> dict[str, Any]:
-    manifest = _read_json(run_dir / "run_manifest.json")
-    training_summary = _read_json(run_dir / "training_summary.json")
-    config_snapshot = _read_json(run_dir / "config_snapshot.json")
-    eval_metrics = _read_json(run_dir / "eval_metrics.json")
-
-    manifest = manifest if isinstance(manifest, dict) else {}
-    training_summary = training_summary if isinstance(training_summary, dict) else {}
-    config_snapshot = config_snapshot if isinstance(config_snapshot, dict) else {}
-
-    model_cfg = config_snapshot.get("model", {}) if isinstance(config_snapshot.get("model"), dict) else {}
-    training_cfg = config_snapshot.get("training", {}) if isinstance(config_snapshot.get("training"), dict) else {}
-    data_cfg = config_snapshot.get("data", {}) if isinstance(config_snapshot.get("data"), dict) else {}
-
-    raw_best_epoch = training_summary.get("best_epoch")
-    best_epoch = int(raw_best_epoch) if isinstance(raw_best_epoch, (int, float)) else None
-
-    return {
-        "eval_metrics": eval_metrics,
-        "config_name": config_snapshot.get("name", manifest.get("config_name", run_dir.name)),
-        "best_epoch": best_epoch,
-        "best_val_loss": training_summary.get("best_val_loss"),
-        "epochs_completed": training_summary.get("epochs_completed"),
-        "stopped_early": training_summary.get("stopped_early"),
-        "best_history_row": _read_history_row(run_dir / "history.csv", best_epoch),
-        "model_variant": model_cfg.get("variant", manifest.get("model_variant")),
-        "learning_rate": model_cfg.get("learning_rate"),
-        "features": data_cfg.get("features", manifest.get("features", [])),
-        "target": data_cfg.get("target", manifest.get("target")),
-        "batch_size": training_cfg.get("batch_size"),
-        "stateful": training_cfg.get("stateful"),
-        "patience": training_cfg.get("patience"),
-        "seed": training_cfg.get("seed"),
-        "overall_eval": _weighted_eval_summary(eval_metrics),
     }
 
 
@@ -297,6 +312,8 @@ class PredictionViewer:
         self.experiments_root = experiments_root
         self.runs = _discover_runs(experiments_root)
         self.current_run: Path | None = None
+        self.current_predictions_dir: Path | None = None
+        self.current_scope_label: str | None = None
         self.current_trial_name: str | None = None
         self.current_meta: dict[str, Any] | None = None
         self.current_trial_data: tuple[str, list[float], list[float], list[float]] | None = None
@@ -443,13 +460,15 @@ class PredictionViewer:
         self._load_run(first)
 
     def _load_run(self, run_name: str) -> None:
-        run_dir = self.runs.get(run_name)
-        if run_dir is None:
+        run_entry = self.runs.get(run_name)
+        if run_entry is None:
             return
 
-        self.current_run = run_dir
-        self.current_meta = _run_metadata(run_dir)
-        trial_names = _trial_names(run_dir)
+        self.current_run = run_entry.run_dir
+        self.current_predictions_dir = run_entry.predictions_dir
+        self.current_scope_label = run_entry.scope_label
+        self.current_meta = _run_metadata(run_entry.run_dir, run_entry.scope_label)
+        trial_names = _trial_names(run_entry.predictions_dir)
         self.trial_combo["values"] = trial_names
 
         if not trial_names:
@@ -463,17 +482,10 @@ class PredictionViewer:
         self._load_trial(first)
 
     def _load_trial(self, trial_name: str) -> None:
-        if self.current_run is None:
+        if self.current_run is None or self.current_predictions_dir is None:
             return
 
-        pred_dir = _prediction_dir(self.current_run)
-        if pred_dir is None:
-            self.current_trial_data = None
-            self._set_info(f"Run has no prediction directory:\n{self.current_run}")
-            self._draw_message("Missing predictions directory")
-            return
-
-        trial_path = pred_dir / f"{trial_name}.csv"
+        trial_path = self.current_predictions_dir / f"{trial_name}.csv"
         if not trial_path.exists():
             self.current_trial_data = None
             self._set_info(f"Missing prediction file:\n{trial_path}")
@@ -532,7 +544,8 @@ class PredictionViewer:
         )
         self._set_info(self._build_detail_text(stats, eval_record, unit))
         self.status_var.set(
-            f"run={self.current_run.name} | trial={self.current_trial_name} | unit={unit} | samples={stats.n_samples}"
+            f"run={self.current_run.name} | scope={self.current_scope_label} | "
+            f"trial={self.current_trial_name} | unit={unit} | samples={stats.n_samples}"
         )
 
     def _build_detail_text(self, stats: TrialStats, eval_record: dict[str, Any] | None, unit: str) -> str:
@@ -592,13 +605,15 @@ class PredictionViewer:
         overall = meta.get("overall_eval")
         lines.append("All-trial Evaluation Summary")
         if isinstance(overall, dict):
+            overall_rmse = overall.get("weighted_rmse_rad", overall.get("weighted_rmse"))
+            overall_mae = overall.get("weighted_mae_rad", overall.get("weighted_mae"))
             lines.append(f"- n_trials: {overall.get('n_trials', 'n/a')}")
             lines.append(f"- n_samples: {overall.get('n_samples', 'n/a')}")
             lines.append(
-                f"- weighted_rmse_{unit_label}: {_fmt(_convert_angle(overall.get('weighted_rmse_rad'), unit))}"
+                f"- weighted_rmse_{unit_label}: {_fmt(_convert_angle(overall_rmse, unit))}"
             )
             lines.append(
-                f"- weighted_mae_{unit_label}: {_fmt(_convert_angle(overall.get('weighted_mae_rad'), unit))}"
+                f"- weighted_mae_{unit_label}: {_fmt(_convert_angle(overall_mae, unit))}"
             )
         else:
             lines.append("- summary: n/a")

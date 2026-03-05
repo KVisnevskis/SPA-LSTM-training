@@ -12,6 +12,9 @@ outputs/
 *.hdf5
 *.csv
 *.json
+*.tex
+*.pdf
+*.png
 
 # Build and packaging artifacts
 build/
