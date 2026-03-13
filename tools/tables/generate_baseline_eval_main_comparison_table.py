@@ -334,13 +334,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-csv",
         type=Path,
-        default=Path("tables/tab_ch5/baseline_eval_main_comparison.csv"),
+        default=Path("outputs/tables/ch4/baseline_eval_main_comparison.csv"),
         help="Output CSV path.",
     )
     parser.add_argument(
         "--output-tex",
         type=Path,
-        default=Path("tables/tab_ch5/baseline_eval_main_comparison.tex"),
+        default=Path("outputs/tables/ch4/baseline_eval_main_comparison.tex"),
         help="Output LaTeX table path.",
     )
     parser.add_argument(

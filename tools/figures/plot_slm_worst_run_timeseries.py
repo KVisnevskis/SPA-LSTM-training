@@ -287,7 +287,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("outputs/figures/slm_lstm_representative_poor_performance_run.pdf"),
+        default=Path("outputs/figures/ch4/slm_lstm_representative_poor_performance_run.pdf"),
         help="Output figure path.",
     )
     parser.add_argument(

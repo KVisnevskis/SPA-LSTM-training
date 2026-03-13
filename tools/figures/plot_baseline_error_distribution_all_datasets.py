@@ -276,8 +276,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("outputs/figures/baseline_error_distribution_all_datasets.pdf"),
-        help="Output figure path (default: outputs/figures/baseline_error_distribution_all_datasets.pdf).",
+        default=Path("outputs/figures/ch4/baseline_error_distribution_all_datasets.pdf"),
+        help="Output figure path (default: outputs/figures/ch4/baseline_error_distribution_all_datasets.pdf).",
     )
     parser.add_argument(
         "--split-roles",

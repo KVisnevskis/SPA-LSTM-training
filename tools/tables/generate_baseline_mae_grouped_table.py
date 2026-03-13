@@ -247,8 +247,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("tables/tab_ch5/baseline_mae_per_run_grouped.tex"),
-        help="Output .tex path (default: tables/tab_ch5/baseline_mae_per_run_grouped.tex).",
+        default=Path("outputs/tables/ch4/baseline_mae_per_run_grouped.tex"),
+        help="Output .tex path (default: outputs/tables/ch4/baseline_mae_per_run_grouped.tex).",
     )
     parser.add_argument(
         "--caption",

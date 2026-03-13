@@ -338,7 +338,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("outputs/figures/baseline_eval_timeseries_stacked_layer_depth.pdf"),
+        default=Path("outputs/figures/ch4/baseline_eval_timeseries_stacked_layer_depth.pdf"),
         help=(
             "Base output path. If one group is selected, writes exactly this file. "
             "If multiple groups are selected, appends '_<group>' before suffix."

@@ -224,7 +224,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("tables/tab_ch5/baseline_extreme_error_counts_360deg.tex"),
+        default=Path("outputs/tables/ch4/baseline_extreme_error_counts_360deg.tex"),
         help="Output .tex table path.",
     )
     parser.add_argument(

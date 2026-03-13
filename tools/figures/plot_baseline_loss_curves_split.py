@@ -150,8 +150,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--save-dir",
         type=Path,
-        default=Path("outputs/figures"),
-        help="Output directory for PDF files (default: outputs/figures).",
+        default=Path("outputs/figures/ch4"),
+        help="Output directory for PDF files (default: outputs/figures/ch4).",
     )
     parser.add_argument(
         "--no-show",

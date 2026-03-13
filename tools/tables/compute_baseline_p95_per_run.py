@@ -167,7 +167,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("tables/tab_ch5/baseline_p95_per_run_all_models.csv"),
+        default=Path("outputs/tables/ch4/baseline_p95_per_run_all_models.csv"),
         help="Output CSV path.",
     )
     return parser.parse_args()

@@ -215,13 +215,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--input",
         type=Path,
-        default=Path("tables/tab_ch5/baseline_p95_per_run_all_models.csv"),
+        default=Path("outputs/tables/ch4/baseline_p95_per_run_all_models.csv"),
         help="Input CSV from compute_baseline_p95_per_run.py.",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("tables/tab_ch5/baseline_p95_per_run_grouped.tex"),
+        default=Path("outputs/tables/ch4/baseline_p95_per_run_grouped.tex"),
         help="Output .tex path.",
     )
     parser.add_argument(

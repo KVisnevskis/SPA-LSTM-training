@@ -195,7 +195,7 @@ def _parse_args() -> argparse.Namespace:
         "--save",
         type=Path,
         default=None,
-        help="Optional output image path (e.g., figures/ch5/baseline_loss_curves.png).",
+        help="Optional output image path (e.g., outputs/figures/ch4/baseline_loss_curves.png).",
     )
     parser.add_argument(
         "--no-show",
