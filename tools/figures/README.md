@@ -27,6 +27,16 @@ These scripts generate Chapter 5 baseline figures from existing artifacts only (
     - `outputs/figures/ch4/baseline_training_loss_curves.pdf`
     - `outputs/figures/ch4/baseline_validation_loss_curves.pdf`
 
+- `plot_baseline_seeded_loss_curves_split.py`
+  - Purpose: two separate figures (training loss and validation loss) for seeded SLM-LSTM runs, including the original `Seed 42` baseline by default.
+  - Usage:
+    - `python3 tools/figures/plot_baseline_seeded_loss_curves_split.py`
+    - `python3 tools/figures/plot_baseline_seeded_loss_curves_split.py --no-show`
+    - `python3 tools/figures/plot_baseline_seeded_loss_curves_split.py --exclude-seeds 97 --no-show`
+  - Default outputs:
+    - `outputs/figures/ch4/baseline_seeded_training_loss_curves.pdf`
+    - `outputs/figures/ch4/baseline_seeded_validation_loss_curves.pdf`
+
 - `plot_baseline_eval_timeseries_stacked.py`
   - Purpose: stacked representative eval time-series comparison (ground truth + baseline predictions).
   - Usage:

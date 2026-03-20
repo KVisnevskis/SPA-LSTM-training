@@ -29,6 +29,29 @@ These scripts generate Chapter 5 baseline tables from saved artifacts only (no r
   - Per-run RMSE grouped by `train -> val -> eval -> unseen`.
   - Output: `outputs/tables/ch4/baseline_rmse_per_run_grouped.tex`
 
+- `generate_baseline_training_summary_table.py`
+  - Compact training-behavior table for the 4 baseline models using `training_summary.json`, `history.csv`, and `resource_usage.csv`.
+  - Outputs:
+    - `outputs/tables/ch4/baseline_training_summary.csv`
+    - `outputs/tables/ch4/baseline_training_summary.tex`
+
+- `generate_baseline_seeded_rmse_grouped_table.py`
+  - Per-run RMSE comparison across seeded SLM-LSTM baseline runs, grouped by `train -> val -> eval -> unseen`.
+  - Includes the original baseline SLM-LSTM run as the default `Seed 42` column.
+  - Output: `outputs/tables/ch4/baseline_slm_seeded_rmse_per_run_grouped.tex`
+
+- `generate_baseline_seeded_training_history_table.py`
+  - Compact seed-level summary of convergence behavior for seeded SLM-LSTM runs, including the original `Seed 42` baseline by default.
+  - Outputs:
+    - `outputs/tables/ch4/baseline_slm_seeded_training_history.csv`
+    - `outputs/tables/ch4/baseline_slm_seeded_training_history.tex`
+
+- `generate_baseline_seeded_training_summary_table.py`
+  - Compact seeded analogue of `baseline_training_summary`, using seed as the comparison axis and omitting training time.
+  - Outputs:
+    - `outputs/tables/ch4/baseline_slm_seeded_training_summary.csv`
+    - `outputs/tables/ch4/baseline_slm_seeded_training_summary.tex`
+
 - `generate_baseline_mae_grouped_table.py`
   - Per-run MAE grouped by `train -> val -> eval -> unseen`.
   - Output: `outputs/tables/ch4/baseline_mae_per_run_grouped.tex`
