@@ -22,7 +22,7 @@ def build_lstm_model(model_cfg: ModelConfig, train_cfg: TrainingConfig, num_feat
     variant = model_cfg.variant
 
     if variant in {"slm_lstm", "slu_lstm"}:
-        units = [512]
+        units = [model_cfg.hidden_units if model_cfg.hidden_units is not None else 512]
     elif variant in {"tlm_lstm", "tlu_lstm"}:
         units = [256, 256]
     else:
@@ -55,4 +55,3 @@ def build_lstm_model(model_cfg: ModelConfig, train_cfg: TrainingConfig, num_feat
         ],
     )
     return model
-

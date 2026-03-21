@@ -117,6 +117,17 @@ def test_build_lstm_model_single_layer_stateful_uses_batch_shape(monkeypatch) ->
     assert model.compile_kwargs["optimizer"] == {"learning_rate": 1e-3}
 
 
+def test_build_lstm_model_single_layer_uses_custom_hidden_units(monkeypatch) -> None:
+    fake_keras = _install_fake_tensorflow(monkeypatch)
+
+    model_cfg = ModelConfig(variant="slm_lstm", learning_rate=1e-3, hidden_units=128)
+    train_cfg = TrainingConfig(stateful=True, batch_size=1)
+    build_lstm_model(model_cfg, train_cfg, num_features=4)
+
+    assert len(fake_keras.lstm_defs) == 1
+    assert fake_keras.lstm_defs[0]["units"] == 128
+
+
 def test_build_lstm_model_two_layer_non_stateful_uses_shape(monkeypatch) -> None:
     fake_keras = _install_fake_tensorflow(monkeypatch)
 
@@ -142,4 +153,3 @@ def test_build_lstm_model_rejects_unknown_variant(monkeypatch) -> None:
 
     with pytest.raises(ValueError, match="Unknown model variant"):
         build_lstm_model(model_cfg, train_cfg, num_features=4)
-

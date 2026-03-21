@@ -63,6 +63,7 @@ class ModelConfig:
 
     variant: str = "slm_lstm"
     learning_rate: float = 1e-3
+    hidden_units: int | None = None
 
     def validate(self) -> None:
         valid = {"slm_lstm", "tlm_lstm", "slu_lstm", "tlu_lstm"}
@@ -70,6 +71,8 @@ class ModelConfig:
             raise ValueError(f"Unknown model variant '{self.variant}'. Expected one of {sorted(valid)}.")
         if self.learning_rate <= 0.0:
             raise ValueError("model.learning_rate must be > 0.")
+        if self.hidden_units is not None and self.hidden_units <= 0:
+            raise ValueError("model.hidden_units must be > 0 when provided.")
 
 
 @dataclass
@@ -167,6 +170,11 @@ def load_experiment_config(path: str | Path) -> ExperimentConfig:
     model_cfg = ModelConfig(
         variant=str(model_raw.get("variant", "slm_lstm")),
         learning_rate=float(model_raw.get("learning_rate", 1e-3)),
+        hidden_units=(
+            int(model_raw["hidden_units"])
+            if model_raw.get("hidden_units") is not None
+            else None
+        ),
     )
 
     training_cfg = TrainingConfig(
