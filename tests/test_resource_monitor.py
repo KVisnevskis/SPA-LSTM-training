@@ -82,3 +82,33 @@ def test_resource_monitor_writes_csv_and_summary(tmp_path, monkeypatch) -> None:
     assert summary["gpu_metrics_observed"] is True
     assert summary["resource_interval_seconds"] == 15.0
 
+
+def test_resource_monitor_appends_and_continues_elapsed_on_resume(tmp_path, monkeypatch) -> None:
+    out_csv = tmp_path / "resource_usage.csv"
+    out_csv.write_text(
+        "\n".join(
+            [
+                "timestamp_unix,elapsed_seconds,cpu_percent,ram_percent,gpu_util_percent,gpu_mem_used_mb,gpu_mem_total_mb",
+                "100.000,12.500,10.000,20.000,30.000,256.000,1024.000",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(rm, "_read_cpu_percent", lambda prev_total, prev_idle: (12.5, 10, 5))
+    monkeypatch.setattr(rm, "_read_memory_percent", lambda: 40.0)
+    monkeypatch.setattr(rm, "_read_gpu_metrics", lambda: (20.0, 256.0, 1024.0))
+
+    monitor = rm.ResourceMonitor(out_csv, interval_seconds=0.01, append=True)
+    monitor.start()
+    time.sleep(0.05)
+    monitor.stop()
+
+    lines = out_csv.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) >= 3
+    assert lines[0].startswith("timestamp_unix,elapsed_seconds,cpu_percent,ram_percent")
+    assert sum(1 for line in lines if line.startswith("timestamp_unix,")) == 1
+
+    last_elapsed = float(lines[-1].split(",")[1])
+    assert last_elapsed >= 12.5

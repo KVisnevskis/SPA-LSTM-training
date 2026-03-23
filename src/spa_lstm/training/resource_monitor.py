@@ -88,32 +88,60 @@ def _read_gpu_metrics() -> tuple[float | None, float | None, float | None]:
 class ResourceMonitor:
     """Background sampler that writes resource usage CSV rows."""
 
-    def __init__(self, output_path: Path, interval_seconds: float = 15.0) -> None:
+    def __init__(self, output_path: Path, interval_seconds: float = 15.0, append: bool = False) -> None:
         self.output_path = output_path
         # Never sample more frequently than every 15 seconds.
         self.interval_seconds = max(15.0, interval_seconds)
+        self.append = append
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._samples = 0
         self._gpu_seen = False
         self._file = None
         self._writer = None
+        self._elapsed_offset_seconds = 0.0
+
+    def _read_elapsed_offset_seconds(self) -> float:
+        if not self.output_path.exists() or self.output_path.stat().st_size <= 0:
+            return 0.0
+
+        last_elapsed: float | None = None
+        with self.output_path.open("r", newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                raw_elapsed = str(row.get("elapsed_seconds", "")).strip()
+                if not raw_elapsed:
+                    continue
+                try:
+                    last_elapsed = float(raw_elapsed)
+                except ValueError:
+                    continue
+        return last_elapsed if last_elapsed is not None else 0.0
 
     def start(self) -> None:
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._file = self.output_path.open("w", newline="", encoding="utf-8")
+        write_header = True
+        open_mode = "w"
+
+        if self.append and self.output_path.exists() and self.output_path.stat().st_size > 0:
+            self._elapsed_offset_seconds = self._read_elapsed_offset_seconds()
+            write_header = False
+            open_mode = "a"
+
+        self._file = self.output_path.open(open_mode, newline="", encoding="utf-8")
         self._writer = csv.writer(self._file)
-        self._writer.writerow(
-            [
-                "timestamp_unix",
-                "elapsed_seconds",
-                "cpu_percent",
-                "ram_percent",
-                "gpu_util_percent",
-                "gpu_mem_used_mb",
-                "gpu_mem_total_mb",
-            ]
-        )
+        if write_header:
+            self._writer.writerow(
+                [
+                    "timestamp_unix",
+                    "elapsed_seconds",
+                    "cpu_percent",
+                    "ram_percent",
+                    "gpu_util_percent",
+                    "gpu_mem_used_mb",
+                    "gpu_mem_total_mb",
+                ]
+            )
         self._file.flush()
         self._thread.start()
 
@@ -138,7 +166,7 @@ class ResourceMonitor:
 
         while not self._stop_event.is_set():
             now = time.time()
-            elapsed = now - start
+            elapsed = self._elapsed_offset_seconds + (now - start)
 
             cpu_percent, prev_total, prev_idle = _read_cpu_percent(prev_total, prev_idle)
             ram_percent = _read_memory_percent()

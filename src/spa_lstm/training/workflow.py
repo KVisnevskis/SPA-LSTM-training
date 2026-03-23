@@ -238,7 +238,11 @@ def run_training(cfg: ExperimentConfig, resume: bool = False) -> Path:
         )
 
     resource_csv_path = output_dir / "resource_usage.csv"
-    monitor = ResourceMonitor(resource_csv_path, interval_seconds=15.0)
+    monitor = ResourceMonitor(
+        resource_csv_path,
+        interval_seconds=15.0,
+        append=resumed_from_checkpoint,
+    )
     resource_info: dict[str, Any] = {
         "resource_usage_csv": str(resource_csv_path),
         "resource_samples": 0,
