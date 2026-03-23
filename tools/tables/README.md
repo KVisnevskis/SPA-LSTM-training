@@ -35,6 +35,22 @@ These scripts generate Chapter 5 baseline tables from saved artifacts only (no r
     - `outputs/tables/ch4/baseline_training_summary.csv`
     - `outputs/tables/ch4/baseline_training_summary.tex`
 
+- `generate_width_ablation_training_summary_table.py`
+  - Compact training summary for the baseline SLM width-ablation study defined by `configs/experiments/hpo/width_ablation`.
+  - Outputs:
+    - `outputs/tables/ch4/width_ablation_training_summary.csv`
+    - `outputs/tables/ch4/width_ablation_training_summary.tex`
+
+- `generate_width_ablation_rmse_grouped_table.py`
+  - Per-run RMSE comparison across the baseline SLM width-ablation runs, grouped by `train -> val -> eval -> unseen`.
+  - Output: `outputs/tables/ch4/width_ablation_rmse_per_run_grouped.tex`
+
+- `generate_best_lstm_vs_basic_rmse_table.py`
+  - Compares the best baseline LSTM, the best width-ablation LSTM, and the best basic estimator in a grouped per-run RMSE table.
+  - Selection rule: lowest mean RMSE on held-out `eval` runs.
+  - Basic-estimator results are parsed from `outputs/tables/ch4/basic_estimator_RMSE_grouped.tex`.
+  - Output: `outputs/tables/ch4/best_lstm_vs_basic_rmse_per_run_grouped.tex`
+
 - `generate_baseline_seeded_rmse_grouped_table.py`
   - Per-run RMSE comparison across seeded SLM-LSTM baseline runs, grouped by `train -> val -> eval -> unseen`.
   - Includes the original baseline SLM-LSTM run as the default `Seed 42` column.
