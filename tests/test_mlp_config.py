@@ -7,12 +7,52 @@ import pytest
 from mlp.config import load_experiment_config
 
 
+def test_load_baseline_mlp_config_file() -> None:
+    cfg = load_experiment_config("configs/experiments/mlp/baseline_mlp.yaml")
+
+    assert cfg.name == "baseline_mlp"
+    assert cfg.data.features == ["pressure", "acc_x", "acc_y", "acc_z"]
+    assert cfg.data.target == "phi"
+    assert cfg.data.train_runs == [
+        "Freehand_tt_1",
+        "Freehand_static_03V_1",
+        "Freehand_static_09V_1",
+        "Freehand_sin_1",
+        "run_0roll_0pitch_tt_1",
+    ]
+    assert cfg.data.val_runs == [
+        "Freehand_tt_2",
+        "Freehand_static_03V_2",
+        "Freehand_static_09V_2",
+        "Freehand_sin_2",
+        "run_0roll_0pitch_tt_2",
+    ]
+    assert cfg.data.eval_runs == [
+        "run_0roll_90pitch_tt_1",
+        "Freehand_tt_3",
+        "Freehand_static_03V_3",
+        "Freehand_static_06V_3",
+        "Freehand_static_09V_3",
+        "Freehand_sin_3",
+    ]
+    assert cfg.model.hidden_layers == [64]
+    assert cfg.model.activation == "relu"
+    assert cfg.model.dropout == 0.0
+    assert cfg.model.learning_rate == 1e-3
+    assert cfg.training.epochs == 200
+    assert cfg.training.patience == 15
+    assert cfg.training.batch_size == 128
+    assert cfg.training.seed == 42
+    assert cfg.runtime.output_dir == "outputs/experiments/mlp"
+    assert cfg.runtime.run_name == "baseline_mlp"
+
+
 def test_load_mlp_experiment_config_parses_valid_yaml(tmp_path: Path) -> None:
-    config_path = tmp_path / "baseline_slm_mlp.yaml"
+    config_path = tmp_path / "baseline_mlp.yaml"
     config_path.write_text(
         "\n".join(
             [
-                "name: baseline_slm_mlp",
+                "name: baseline_mlp",
                 "data:",
                 "  h5_path: outputs/preprocessed_all_trials.h5",
                 "  features: [pressure, acc_x, acc_y, acc_z]",
@@ -37,7 +77,7 @@ def test_load_mlp_experiment_config_parses_valid_yaml(tmp_path: Path) -> None:
                 "  verbose: 1",
                 "runtime:",
                 "  output_dir: outputs/experiments/mlp",
-                "  run_name: baseline_slm_mlp",
+                "  run_name: baseline_mlp",
             ]
         ),
         encoding="utf-8",
@@ -45,14 +85,14 @@ def test_load_mlp_experiment_config_parses_valid_yaml(tmp_path: Path) -> None:
 
     cfg = load_experiment_config(config_path)
 
-    assert cfg.name == "baseline_slm_mlp"
+    assert cfg.name == "baseline_mlp"
     assert cfg.data.features == ["pressure", "acc_x", "acc_y", "acc_z"]
     assert cfg.data.eval_runs == ["run_e"]
     assert cfg.model.hidden_layers == [64, 32]
     assert cfg.model.activation == "relu"
     assert cfg.model.dropout == 0.1
     assert cfg.training.batch_size == 128
-    assert cfg.runtime.run_name == "baseline_slm_mlp"
+    assert cfg.runtime.run_name == "baseline_mlp"
 
 
 def test_load_mlp_experiment_config_uses_defaults(tmp_path: Path) -> None:

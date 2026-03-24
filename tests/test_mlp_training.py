@@ -51,7 +51,7 @@ class _FakeModel:
 
 def _make_cfg(tmp_path, *, epochs: int = 3, patience: int = 5) -> ExperimentConfig:  # noqa: ANN001
     return ExperimentConfig(
-        name="baseline_slm_mlp",
+        name="baseline_mlp",
         data=DataConfig(
             h5_path=str(tmp_path / "dataset.h5"),
             features=["pressure", "acc_x", "acc_y", "acc_z"],
@@ -63,7 +63,7 @@ def _make_cfg(tmp_path, *, epochs: int = 3, patience: int = 5) -> ExperimentConf
         ),
         model=ModelConfig(hidden_layers=[64], activation="relu", dropout=0.0, learning_rate=1e-3),
         training=TrainingConfig(epochs=epochs, patience=patience, batch_size=8, seed=42, verbose=0),
-        runtime=RuntimeConfig(output_dir=str(tmp_path / "outputs"), run_name="baseline_slm_mlp"),
+        runtime=RuntimeConfig(output_dir=str(tmp_path / "outputs"), run_name="baseline_mlp"),
     )
 
 
@@ -121,7 +121,7 @@ def test_run_training_writes_required_artifacts_and_tracks_best_epoch(tmp_path, 
 
     with (out_dir / "run_manifest.json").open("r", encoding="utf-8") as f:
         manifest = json.load(f)
-    assert manifest["config_name"] == "baseline_slm_mlp"
+    assert manifest["config_name"] == "baseline_mlp"
     assert manifest["model_family"] == "mlp"
     assert manifest["row_counts"] == {"train": 4, "val": 2}
 
