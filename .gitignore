@@ -32,3 +32,6 @@ context/*
 
 # Local scratch/reference-only files (intentionally untracked)
 legacy/
+docs/mlp_plan.md
+docs/RMSE_trace_LSTM.md
+docs/RMSE_trace_MLP.md
