@@ -3,7 +3,7 @@
 These scripts generate Chapter 5 baseline tables from saved artifacts only (no retraining).
 
 ## Prerequisites
-- Run commands from repo root: `/home/visne/projects/SPA-LSTM/SPA-LSTM-training`
+- Run commands from repo root (the directory containing `pyproject.toml`)
 - Python 3
 
 ## Notes

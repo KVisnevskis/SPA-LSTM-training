@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "SPA bending-angle estimation training pipeline scaffold"
 readme = "README.md"
 requires-python = ">=3.10"
-authors = [{ name = "SPA-LSTM" }]
+authors = [{ name = "Krisjanis Visnevskis" }]
 dependencies = [
   "numpy>=1.26",
   "pandas>=2.2",
