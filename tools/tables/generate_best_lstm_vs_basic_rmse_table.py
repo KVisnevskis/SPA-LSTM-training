@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Compare the best baseline LSTM, best width-ablation LSTM, and best basic estimator.
+"""Compare selected LSTM, MLP, and basic-estimator baselines.
 
 Selection rule:
-- Best baseline LSTM: lowest mean RMSE over held-out `eval` runs from the 4 baseline models.
+- Seeded LSTM: fixed to the seed-7 SLM-LSTM run from the seeded variability study.
 - Best width-ablation LSTM: lowest mean RMSE over held-out `eval` runs from the
   baseline SLM-LSTM width-ablation study.
-- Best basic estimator: lowest mean RMSE over held-out `eval` rows parsed from
-  `outputs/tables/ch4/basic_estimator_RMSE_grouped.tex`.
+- Best MLP: lowest mean RMSE over held-out `eval` runs from the MLP HPO runs.
+- Basic estimators: fixed to the pressure+accelerometer linear and quadratic models
+  parsed from `outputs/tables/ch4/basic_estimator_RMSE_grouped.tex`.
 
 The output is a grouped longtable with per-run RMSE [deg] across all runs.
 """
@@ -21,14 +22,8 @@ from pathlib import Path
 from typing import Any
 
 
-BASELINE_RUNS: tuple[tuple[str, str], ...] = (
-    ("SLM-LSTM", "outputs/experiments/baseline/baseline_slm_lstm"),
-    ("SLU-LSTM", "outputs/experiments/baseline/baseline_slu_lstm"),
-    ("TLM-LSTM", "outputs/experiments/baseline/baseline_tlm_lstm"),
-    ("TLU-LSTM", "outputs/experiments/baseline/baseline_tlu_lstm"),
-)
-
 WIDTH_CONFIG_RE = re.compile(r"^slm_width_ablation__baseline__u(?P<width>\d+)__seed(?P<seed>\d+)$")
+MLP_RUN_RE = re.compile(r"^baseline_mlp__(?P<layers>u\d+(?:_u\d+)*)__lr(?P<lr>\d+e\d+)$")
 SECTION_TITLE_TO_ROLE = {
     "training datasets": "train",
     "validation datasets": "val",
@@ -111,6 +106,13 @@ def _extract_per_run_from_metrics(metrics_rows: list[dict[str, Any]]) -> dict[st
     return per_run
 
 
+def _load_per_run_from_metrics(path: Path) -> dict[str, tuple[str, float]]:
+    metrics = _load_json(path)
+    if not isinstance(metrics, list):
+        raise ValueError(f"Expected JSON list in {path}")
+    return _extract_per_run_from_metrics([row for row in metrics if isinstance(row, dict)])
+
+
 def _mean_eval_rmse(per_run: dict[str, tuple[str, float]]) -> float:
     eval_values = [value for split_role, value in per_run.values() if split_role == "eval"]
     if not eval_values:
@@ -118,25 +120,8 @@ def _mean_eval_rmse(per_run: dict[str, tuple[str, float]]) -> float:
     return sum(eval_values) / len(eval_values)
 
 
-def _select_best_baseline(repo_root: Path) -> tuple[str, dict[str, tuple[str, float]]]:
-    best_label: str | None = None
-    best_per_run: dict[str, tuple[str, float]] | None = None
-    best_mean = float("inf")
-
-    for model_label, run_dir_rel in BASELINE_RUNS:
-        metrics = _load_json(repo_root / run_dir_rel / "eval_metrics_all_runs.json")
-        if not isinstance(metrics, list):
-            raise ValueError(f"Expected JSON list in {run_dir_rel}/eval_metrics_all_runs.json")
-        per_run = _extract_per_run_from_metrics([row for row in metrics if isinstance(row, dict)])
-        mean_eval = _mean_eval_rmse(per_run)
-        if mean_eval < best_mean:
-            best_mean = mean_eval
-            best_label = model_label
-            best_per_run = per_run
-
-    if best_label is None or best_per_run is None:
-        raise ValueError("Could not determine the best baseline LSTM model.")
-    return best_label, best_per_run
+def _load_seeded_baseline(run_dir: Path) -> tuple[str, dict[str, tuple[str, float]]]:
+    return "SLM-LSTM (seed 7)", _load_per_run_from_metrics(run_dir / "eval_metrics_all_runs.json")
 
 
 def _discover_width_runs(config_dir: Path, run_root: Path) -> list[tuple[int, str, Path]]:
@@ -167,10 +152,7 @@ def _select_best_width_ablation(
     best_mean = float("inf")
 
     for width, _, run_dir in _discover_width_runs(config_dir=config_dir, run_root=run_root):
-        metrics = _load_json(run_dir / "eval_metrics_all_runs.json")
-        if not isinstance(metrics, list):
-            raise ValueError(f"Expected JSON list in {run_dir / 'eval_metrics_all_runs.json'}")
-        per_run = _extract_per_run_from_metrics([row for row in metrics if isinstance(row, dict)])
+        per_run = _load_per_run_from_metrics(run_dir / "eval_metrics_all_runs.json")
         mean_eval = _mean_eval_rmse(per_run)
         if mean_eval < best_mean:
             best_mean = mean_eval
@@ -179,6 +161,50 @@ def _select_best_width_ablation(
 
     if best_label is None or best_per_run is None:
         raise ValueError("Could not determine the best width-ablation LSTM model.")
+    return best_label, best_per_run
+
+
+def _discover_mlp_runs(run_root: Path) -> list[tuple[str, Path]]:
+    discovered: list[tuple[str, Path]] = []
+    for run_dir in sorted(p for p in run_root.iterdir() if p.is_dir()):
+        if MLP_RUN_RE.match(run_dir.name) is None:
+            continue
+        metrics_path = run_dir / "eval_metrics_all_runs.json"
+        if not metrics_path.exists():
+            raise FileNotFoundError(f"Expected MLP metrics at {metrics_path}, but it does not exist.")
+        discovered.append((run_dir.name, run_dir))
+    if not discovered:
+        raise ValueError(f"No MLP runs discovered from {run_root}")
+    return discovered
+
+
+def _format_mlp_label(run_name: str) -> str:
+    match = MLP_RUN_RE.match(run_name)
+    if match is None:
+        raise ValueError(f"Unexpected MLP run name format: {run_name}")
+
+    layer_tokens = match.group("layers").split("_")
+    layer_label = "/".join(str(int(token.removeprefix("u"))) for token in layer_tokens)
+    lr_token = match.group("lr")
+    lr_label = lr_token.replace("e", "e-")
+    return f"MLP ({layer_label}, {lr_label})"
+
+
+def _select_best_mlp(run_root: Path) -> tuple[str, dict[str, tuple[str, float]]]:
+    best_label: str | None = None
+    best_per_run: dict[str, tuple[str, float]] | None = None
+    best_mean = float("inf")
+
+    for run_name, run_dir in _discover_mlp_runs(run_root):
+        per_run = _load_per_run_from_metrics(run_dir / "eval_metrics_all_runs.json")
+        mean_eval = _mean_eval_rmse(per_run)
+        if mean_eval < best_mean:
+            best_mean = mean_eval
+            best_label = _format_mlp_label(run_name)
+            best_per_run = per_run
+
+    if best_label is None or best_per_run is None:
+        raise ValueError("Could not determine the best MLP model.")
     return best_label, best_per_run
 
 
@@ -253,59 +279,38 @@ def _parse_basic_estimator_table(
     return estimator_headers, per_estimator
 
 
-def _select_best_basic_estimator(
+def _select_basic_estimators(
     basic_table_path: Path,
-) -> tuple[str, dict[str, tuple[str, float]]]:
+    estimator_names: tuple[str, ...],
+) -> list[tuple[str, dict[str, tuple[str, float]]]]:
     estimator_headers, per_estimator = _parse_basic_estimator_table(basic_table_path)
-    best_label: str | None = None
-    best_per_run: dict[str, tuple[str, float]] | None = None
-    best_mean = float("inf")
-
-    for estimator_name in estimator_headers:
-        per_run = per_estimator[estimator_name]
-        mean_eval = _mean_eval_rmse(per_run)
-        if mean_eval < best_mean:
-            best_mean = mean_eval
-            best_label = estimator_name
-            best_per_run = per_run
-
-    if best_label is None or best_per_run is None:
-        raise ValueError("Could not determine the best basic estimator.")
-    return best_label, best_per_run
+    selected: list[tuple[str, dict[str, tuple[str, float]]]] = []
+    for estimator_name in estimator_names:
+        if estimator_name not in estimator_headers:
+            raise ValueError(
+                f"Basic estimator '{estimator_name}' not found in {basic_table_path}. "
+                f"Available columns: {estimator_headers}"
+            )
+        selected.append((estimator_name, per_estimator[estimator_name]))
+    return selected
 
 
 def _build_rows(
-    baseline_label: str,
-    baseline_per_run: dict[str, tuple[str, float]],
-    width_label: str,
-    width_per_run: dict[str, tuple[str, float]],
-    basic_label: str,
-    basic_per_run: dict[str, tuple[str, float]],
+    column_specs: list[tuple[str, dict[str, tuple[str, float]]]],
 ) -> list[dict[str, Any]]:
-    run_names = sorted(set(baseline_per_run) | set(width_per_run) | set(basic_per_run))
+    run_names = sorted({run_name for _, per_run in column_specs for run_name in per_run})
     rows: list[dict[str, Any]] = []
     for run_name in run_names:
-        role_candidates = {
-            baseline_per_run[run_name][0] for source in (baseline_per_run,) if run_name in source
-        } | {
-            width_per_run[run_name][0] for source in (width_per_run,) if run_name in source
-        } | {
-            basic_per_run[run_name][0] for source in (basic_per_run,) if run_name in source
-        }
+        role_candidates = {per_run[run_name][0] for _, per_run in column_specs if run_name in per_run}
         if not role_candidates:
             continue
         if len(role_candidates) > 1:
             raise ValueError(f"Inconsistent split role for run '{run_name}': {sorted(role_candidates)}")
         split_role = next(iter(role_candidates))
-        rows.append(
-            {
-                "run_name": run_name,
-                "split_role": split_role,
-                baseline_label: baseline_per_run.get(run_name, (split_role, float("nan")))[1],
-                width_label: width_per_run.get(run_name, (split_role, float("nan")))[1],
-                basic_label: basic_per_run.get(run_name, (split_role, float("nan")))[1],
-            }
-        )
+        row: dict[str, Any] = {"run_name": run_name, "split_role": split_role}
+        for label, per_run in column_specs:
+            row[label] = per_run.get(run_name, (split_role, float("nan")))[1]
+        rows.append(row)
     rows.sort(key=lambda row: (SPLIT_ROLE_ORDER[str(row["split_role"])], str(row["run_name"]).lower()))
     return rows
 
@@ -402,8 +407,8 @@ def _parse_args() -> argparse.Namespace:
     default_repo_root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(
         description=(
-            "Generate a grouped RMSE table comparing the best baseline LSTM, "
-            "the best width-ablation LSTM, and the best basic estimator."
+            "Generate a grouped RMSE table comparing the seed-7 SLM-LSTM, "
+            "the best width-ablation LSTM, the best MLP, and selected basic estimators."
         )
     )
     parser.add_argument(
@@ -423,6 +428,18 @@ def _parse_args() -> argparse.Namespace:
         type=Path,
         default=Path("outputs/experiments/hpo/width_ablation"),
         help="Directory containing the width-ablation run directories.",
+    )
+    parser.add_argument(
+        "--seeded-run-dir",
+        type=Path,
+        default=Path("outputs/experiments/baseline_slm_seeded_replication/baseline_slm_lstm_seed_7"),
+        help="Directory containing the fixed seed-7 seeded-replication run.",
+    )
+    parser.add_argument(
+        "--mlp-run-root",
+        type=Path,
+        default=Path("outputs/experiments/mlp/hpo"),
+        help="Directory containing the MLP HPO run directories.",
     )
     parser.add_argument(
         "--basic-source",
@@ -464,30 +481,35 @@ def main() -> None:
     width_run_root = (
         args.width_run_root if args.width_run_root.is_absolute() else (repo_root / args.width_run_root)
     )
+    seeded_run_dir = (
+        args.seeded_run_dir if args.seeded_run_dir.is_absolute() else (repo_root / args.seeded_run_dir)
+    )
+    mlp_run_root = args.mlp_run_root if args.mlp_run_root.is_absolute() else (repo_root / args.mlp_run_root)
     basic_source = args.basic_source if args.basic_source.is_absolute() else (repo_root / args.basic_source)
     output_path = args.output if args.output.is_absolute() else (repo_root / args.output)
 
-    baseline_label, baseline_per_run = _select_best_baseline(repo_root)
+    baseline_label, baseline_per_run = _load_seeded_baseline(seeded_run_dir)
     width_label, width_per_run = _select_best_width_ablation(width_config_dir, width_run_root)
-    basic_label, basic_per_run = _select_best_basic_estimator(basic_source)
+    mlp_label, mlp_per_run = _select_best_mlp(mlp_run_root)
+    basic_specs = _select_basic_estimators(basic_source, estimator_names=("LPA-QR", "PA-QR"))
 
-    rows = _build_rows(
-        baseline_label=baseline_label,
-        baseline_per_run=baseline_per_run,
-        width_label=width_label,
-        width_per_run=width_per_run,
-        basic_label=basic_label,
-        basic_per_run=basic_per_run,
-    )
+    column_specs = [
+        (baseline_label, baseline_per_run),
+        (width_label, width_per_run),
+        (mlp_label, mlp_per_run),
+        *basic_specs,
+    ]
+    rows = _build_rows(column_specs=column_specs)
     caption = (
-        "Per-run RMSE [deg] comparing the best baseline LSTM model "
-        f"({_latex_escape(baseline_label)}), the best width-ablation LSTM model "
-        f"({_latex_escape(width_label)}), and the best basic estimator "
-        f"({_latex_escape(basic_label)}). Models are selected by lowest mean RMSE over the "
+        "Per-run RMSE [deg] comparing the fixed seeded SLM-LSTM run "
+        f"({_latex_escape(baseline_label)}), the best width-ablation SLM-LSTM run "
+        f"({_latex_escape(width_label)}), the best MLP run "
+        f"({_latex_escape(mlp_label)}), and the LPA-QR / PA-QR basic estimators. "
+        "The width-ablation LSTM and MLP models are selected by lowest mean RMSE over the "
         "held-out evaluation runs."
     )
     table_tex = _render_longtable(
-        column_labels=[baseline_label, width_label, basic_label],
+        column_labels=[label for label, _ in column_specs],
         rows=rows,
         caption=caption,
         label=args.label,
@@ -498,9 +520,10 @@ def main() -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(table_tex, encoding="utf-8")
     print(f"Wrote table: {output_path}")
-    print(f"Baseline best: {baseline_label}")
+    print(f"Seeded LSTM: {baseline_label}")
     print(f"Width-ablation best: {width_label}")
-    print(f"Basic-estimator best: {basic_label}")
+    print(f"MLP best: {mlp_label}")
+    print(f"Basic estimators: {', '.join(label for label, _ in basic_specs)}")
     print(f"Rows: {len(rows)}")
 
 
