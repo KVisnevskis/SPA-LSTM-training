@@ -45,6 +45,11 @@ These scripts generate Chapter 5 baseline tables from saved artifacts only (no r
   - Per-run RMSE comparison across the baseline SLM width-ablation runs, grouped by `train -> val -> eval -> unseen`.
   - Output: `outputs/tables/ch4/width_ablation_rmse_per_run_grouped.tex`
 
+- `generate_additional_train_set_rmse_grouped_table.py`
+  - Per-run RMSE comparison across the additional-train-set SLM-LSTM runs, grouped by `train -> val -> eval -> unseen`.
+  - Includes the current best width-ablation comparison run (`u016`) as an extra column.
+  - Output: `outputs/tables/ch4/lstm_additional_train_sets_rmse_per_run_grouped.tex`
+
 - `generate_best_lstm_vs_basic_rmse_table.py`
   - Compares the best baseline LSTM, the best width-ablation LSTM, and the best basic estimator in a grouped per-run RMSE table.
   - Selection rule: lowest mean RMSE on held-out `eval` runs.
